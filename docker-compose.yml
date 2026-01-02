@@ -80,9 +80,9 @@ services:
       dockerfile: Dockerfile.fileserver
     container_name: evodata-fileserver
     environment:
-      - FILE_SERVER_PORT=8000
+      - FILE_SERVER_PORT=8001
     ports:
-      - "8000:8000"
+      - "8001:8001"  # Cambiado a 8001 por conflicto de puerto
     volumes:
       - ./exports:/app/exports
     networks:
