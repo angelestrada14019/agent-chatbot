@@ -1,248 +1,287 @@
 """
-📚 Example: Using Calculator Tool
-Ejemplos de uso de la herramienta de cálculos estadísticos
+📚 Example: Using Calculator Tool (Expression Evaluator)
+Ejemplos de uso de la calculadora como evaluador de expresiones
 """
-import pandas as pd
-from tools.calculator import get_calculator
+from tools.calculator import get_calculator, calc
 
 
-def example_1_basic_metrics():
-    """Ejemplo 1: Métricas básicas"""
+def example_1_basic_arithmetic():
+    """Ejemplo 1: Aritmética básica"""
     print("\n" + "="*60)
-    print("🧮 EJEMPLO 1: Métricas Básicas")
+    print("🧮 EJEMPLO 1: Aritmética Básica")
     print("="*60)
     
-    # Datos de ejemplo
-    data = pd.DataFrame({
-        "producto": ["A", "B", "C", "D", "E"],
-        "ventas": [1000, 1500, 1200, 900, 1100],
-        "cantidad": [50, 75, 60, 45, 55]
-    })
+    calculator = get_calculator()
     
-    calc = get_calculator()
+    expressions = [
+        "2 + 2",
+        "10 - 3",
+        "4 * 5",
+        "20 / 4",
+        "17 // 5",  # División entera
+        "17 % 5",   # Módulo
+        "2 ** 8",   # Potencia
+    ]
     
-    # Calcular métricas
-    result = calc.execute_with_logging(
-        "metrics",
-        data=data,
-        columns=["ventas", "cantidad"],
-        metrics=["sum", "mean", "std", "min", "max"]
-    )
-    
-    if result.success:
-        print("\n✅ Métricas calculadas:")
-        for col, metrics in result.data.items():
-            print(f"\n{col}:")
-            for metric, value in metrics.items():
-                print(f"  - {metric}: {value:.2f}")
-    else:
-        print(f"❌ Error: {result.error}")
+    for expr in expressions:
+        result = calculator.execute_with_logging("evaluate", expression=expr)
+        if result.success:
+            print(f"  {result.metadata['formatted']}")
 
 
-def example_2_growth_rate():
-    """Ejemplo 2: Tasa de crecimiento"""
+def example_2_complex_expressions():
+    """Ejemplo 2: Expresiones complejas"""
     print("\n" + "="*60)
-    print("📈 EJEMPLO 2: Tasa de Crecimiento")
+    print("🔢 EJEMPLO 2: Expresiones Complejas")
     print("="*60)
     
-    # Datos de ventas mensuales
-    data = pd.DataFrame({
-        "mes": ["Ene", "Feb", "Mar", "Abr", "May"],
-        "ventas": [10000, 12000, 11500, 13000, 14500]
-    })
+    expressions = [
+        "(10 + 5) * 2",
+        "100 / (5 + 5)",
+        "(2 ** 3) + (4 ** 2)",
+        "-(5 + 3) * 2",
+        "((8 + 2) * 3) / 6",
+    ]
     
-    calc = get_calculator()
-    
-    result = calc.execute_with_logging(
-        "growth_rate",
-        data=data,
-        value_column="ventas",
-        period_column="mes",
-        periods=1
-    )
-    
-    if result.success:
-        print("\n✅ Crecimiento calculado:")
-        print(f"Tasa promedio: {result.metadata['average_growth_rate']:.2f}%")
-        print("\nDetalle por período:")
-        for row in result.data:
-            growth = row.get('growth_rate_%')
-            if pd.notna(growth):
-                print(f"  {row['ventas']:.0f} → {growth:+.2f}%")
+    for expr in expressions:
+        result = calc(expr)  # Función de conveniencia
+        print(f"  {expr} = {result}")
 
 
-def example_3_moving_average():
-    """Ejemplo 3: Promedio móvil"""
+def example_3_trigonometry():
+    """Ejemplo 3: Funciones trigonométricas"""
     print("\n" + "="*60)
-    print("📊 EJEMPLO 3: Promedio Móvil")
+    print("📐 EJEMPLO 3: Trigonometría")
     print("="*60)
     
-    # Datos con fluctuaciones
-    data = pd.DataFrame({
-        "dia": range(1, 11),
-        "ventas": [100, 120, 110, 130, 125, 140, 135, 150, 145, 160]
-    })
+    expressions = [
+        "sin(0)",
+        "sin(pi/2)",
+        "cos(0)",
+        "tan(pi/4)",
+        "asin(1)",
+        "acos(0)",
+    ]
     
-    calc = get_calculator()
-    
-    result = calc.execute_with_logging(
-        "moving_average",
-        data=data,
-        column="ventas",
-        window=3,
-        ma_type="simple"
-    )
-    
-    if result.success:
-        print("\n✅ Promedio móvil calculado:")
-        for row in result.data:
-            ma = row.get('ma_3')
-            if pd.notna(ma):
-                print(f"  Día {row.get('dia', 'N/A')}: Venta={row['ventas']}, MA(3)={ma:.2f}")
+    for expr in expressions:
+        result = calc(expr)
+        print(f"  {expr} = {result}")
 
 
-def example_4_outliers():
-    """Ejemplo 4: Detección de outliers"""
+def example_4_logarithms():
+    """Ejemplo 4: Logaritmos y exponenciales"""
     print("\n" + "="*60)
-    print("🔍 EJEMPLO 4: Detección de Outliers")
+    print("📊 EJEMPLO 4: Logaritmos y Exponenciales")
     print("="*60)
     
-    # Datos con algunos valores atípicos
-    data = pd.DataFrame({
-        "cliente_id": range(1, 21),
-        "compra": [100, 95, 110, 105, 98, 102, 500, 103, 99, 107,  # 500 es outlier
-                   104, 96, 101, 108, 1000, 99, 103, 97, 105, 102]  # 1000 es outlier
-    })
+    expressions = [
+        "log(100, 10)",  # log base 10 de 100
+        "log10(1000)",
+        "log2(8)",
+        "exp(1)",  # e^1
+        "exp(2)",
+        "log(e)",  # ln(e)
+    ]
     
-    calc = get_calculator()
-    
-    result = calc.execute_with_logging(
-        "outliers",
-        data=data,
-        column="compra",
-        method="iqr",
-        threshold=1.5
-    )
-    
-    if result.success:
-        print(f"\n✅ Outliers detectados: {result.metadata['outliers_count']}")
-        print(f"Porcentaje: {result.metadata['outliers_percentage']:.1f}%")
-        print("\nValores atípicos:")
-        for row in result.data:
-            print(f"  Cliente {row['cliente_id']}: ${row['compra']}")
+    for expr in expressions:
+        result = calc(expr)
+        print(f"  {expr} = {result}")
 
 
-def example_5_correlation():
-    """Ejemplo 5: Matriz de correlación"""
+def example_5_roots_and_powers():
+    """Ejemplo 5: Raíces y potencias"""
     print("\n" + "="*60)
-    print("🔗 EJEMPLO 5: Correlación")
+    print("🔺 EJEMPLO 5: Raíces y Potencias")
     print("="*60)
     
-    # Datos de múltiples variables
-    data = pd.DataFrame({
-        "ventas": [100, 150, 120, 180, 160, 140, 200, 170],
-        "publicidad": [10, 15, 12, 20, 18, 14, 25, 19],
-        "precio": [50, 48, 52, 45, 47, 51, 44, 46],
-        "temperatura": [25, 28, 24, 30, 29, 26, 32, 28]
-    })
+    expressions = [
+        "sqrt(16)",
+        "sqrt(2)",
+        "cbrt(27)",  # Raíz cúbica
+        "pow(2, 10)",
+        "sqrt(144) + sqrt(25)",
+    ]
     
-    calc = get_calculator()
-    
-    result = calc.execute_with_logging(
-        "correlation",
-        data=data,
-        method="pearson"
-    )
-    
-    if result.success:
-        print("\n✅ Correlaciones fuertes encontradas:")
-        for corr in result.data["strong_correlations"]:
-            print(f"  {corr['col1']} ↔ {corr['col2']}: {corr['correlation']:.3f}")
+    for expr in expressions:
+        result = calc(expr)
+        print(f"  {expr} = {result}")
 
 
-def example_6_aggregates():
-    """Ejemplo 6: Agregaciones por grupo"""
+def example_6_rounding():
+    """Ejemplo 6: Redondeo"""
     print("\n" + "="*60)
-    print("📊 EJEMPLO 6: Agregaciones por Grupo")
+    print("🎯 EJEMPLO 6: Funciones de Redondeo")
     print("="*60)
     
-    # Datos de ventas por categoría
-    data = pd.DataFrame({
-        "categoria": ["Electrónica", "Ropa", "Electrónica", "Alimentos", 
-                      "Ropa", "Electrónica", "Alimentos", "Ropa"],
-        "ventas": [1000, 500, 1200, 300, 450, 900, 350, 550],
-        "unidades": [10, 25, 12, 40, 22, 9, 45, 28]
-    })
+    expressions = [
+        "round(3.7)",
+        "round(3.14159, 2)",  # Python permite pero nuestra calc no pasarparams adicionales así
+        "floor(3.7)",
+        "ceil(3.2)",
+        "trunc(3.9)",
+        "abs(-15)",
+    ]
     
-    calc = get_calculator()
-    
-    result = calc.execute_with_logging(
-        "aggregates",
-        data=data,
-        group_by="categoria",
-        agg_column="ventas",
-        agg_functions=["sum", "mean", "count"]
-    )
-    
-    if result.success:
-        print("\n✅ Agregaciones por categoría:")
-        for row in result.data:
-            print(f"\n{row['categoria']}:")
-            print(f"  Total: ${row.get('sum', 0):.0f}")
-            print(f"  Promedio: ${row.get('mean', 0):.0f}")
-            print(f"  Cantidad: {row.get('count', 0)}")
+    for expr in expressions:
+        try:
+            result = calc(expr)
+            print(f"  {expr} = {result}")
+        except Exception as e:
+            print(f"  {expr} → Error: {e}")
 
 
-def example_7_percentiles():
-    """Ejemplo 7: Cálculo de percentiles"""
+def example_7_special_functions():
+    """Ejemplo 7: Funciones especiales"""
     print("\n" + "="*60)
-    print("📊 EJEMPLO 7: Percentiles")
+    print("⭐ EJEMPLO 7: Funciones Especiales")
     print("="*60)
     
-    # Datos de salarios
-    data = pd.DataFrame({
-        "empleado_id": range(1, 51),
-        "salario": [30000 + i*1000 + (i%7)*500 for i in range(50)]
-    })
+    expressions = [
+        "factorial(5)",
+        "factorial(10)",
+        "gcd(48, 18)",
+        "lcm(12, 18)",
+        "max(10, 25, 5, 30)",
+        "min(10, 25, 5, 30)",
+    ]
     
-    calc = get_calculator()
+    for expr in expressions:
+        result = calc(expr)
+        print(f"  {expr} = {result}")
+
+
+def example_8_constants():
+    """Ejemplo 8: Uso de constantes"""
+    print("\n" + "="*60)
+    print("🔢 EJEMPLO 8: Constantes Matemáticas")
+    print("="*60)
     
-    result = calc.execute_with_logging(
-        "percentiles",
-        data=data,
-        column="salario",
-        percentiles=[0.25, 0.5, 0.75, 0.9, 0.95]
-    )
+    expressions = [
+        "pi",
+        "e",
+        "tau",  # 2*pi
+        "pi * 2",
+        "e ** 2",
+        "sin(pi)",
+        "cos(2*pi)",
+    ]
+    
+    for expr in expressions:
+        result = calc(expr)
+        print(f"  {expr} = {result}")
+
+
+def example_9_real_world():
+    """Ejemplo 9: Casos de uso real"""
+    print("\n" + "="*60)
+    print("🌍 EJEMPLO 9: Casos de Uso Reales")
+    print("="*60)
+    
+    # Calcular área de círculo
+    radius = 5
+    area = calc(f"pi * {radius} ** 2")
+    print(f"  Área de círculo (r={radius}): {area:.2f}")
+    
+    # Calcular hipotenusa
+    a, b = 3, 4
+    hypotenuse = calc(f"sqrt({a}**2 + {b}**2)")
+    print(f"  Hipotenusa (catetos {a}, {b}): {hypotenuse}")
+    
+    # Convertir grados a radianes y calcular seno
+    degrees = 30
+    radians_expr = f"({degrees} * pi) / 180"
+    radians = calc(radians_expr)
+    sin_30 = calc(f"sin({radians})")
+    print(f"  sin(30°) = {sin_30}")
+    
+    # Calcular interés compuesto
+    principal = 1000
+    rate = 0.05  # 5%
+    years = 10
+    final = calc(f"{principal} * (1 + {rate}) ** {years}")
+    print(f"  Interés compuesto (P=${principal}, r=5%, t={years} años): ${final:.2f}")
+
+
+def example_10_help():
+    """Ejemplo 10: Ver funciones disponibles"""
+    print("\n" + "="*60)
+    print("❓ EJEMPLO 10: Ayuda - Funciones Disponibles")
+    print("="*60)
+    
+    calculator = get_calculator()
+    result = calculator.execute("help")
     
     if result.success:
-        print("\n✅ Percentiles de salarios:")
-        for percentile, value in result.data.items():
-            print(f"  {percentile}: ${value:,.0f}")
+        data = result.data
+        
+        print("\n📌 Operadores:")
+        print(f"  Aritméticos: {', '.join(data['operators']['arithmetic'])}")
+        print(f"  Unarios: {', '.join(data['operators']['unary'])}")
+        
+        print("\n🔧 Funciones:")
+        for category, functions in data['functions'].items():
+            print(f"  {category.capitalize()}: {', '.join(functions)}")
+        
+        print(f"\n🔢 Constantes: {', '.join(data['constants'])}")
+        
+        print("\n📚 Ejemplos:")
+        for example in data['examples']:
+            print(f"  {example}")
+
+
+def example_11_error_handling():
+    """Ejemplo 11: Manejo de errores"""
+    print("\n" + "="*60)
+    print("⚠️ EJEMPLO 11: Manejo de Errores")
+    print("="*60)
+    
+    calculator = get_calculator()
+    
+    invalid_expressions = [
+        "2 / 0",  # División por cero
+        "sqrt(-1)",  # Raíz de negativo
+        "invalid_function(5)",  # Función no existente
+        "2 +",  # Sintaxis incorrecta
+        "import os",  # Código malicioso (no permitido)
+    ]
+    
+    for expr in invalid_expressions:
+        result = calculator.execute("evaluate", expression=expr)
+        if result.success:
+            print(f"  ✅ {expr} = {result.data['result']}")
+        else:
+            print(f"  ❌ {expr} → {result.error}")
 
 
 if __name__ == "__main__":
     print("""
-    🧮 Calculator Tool - Ejemplos de Uso
-    ====================================
+    🧮 Calculator Tool - Evaluador de Expresiones
+    ==============================================
     
-    Ejecutando 7 ejemplos de cálculos estadísticos...
+    Calculadora que evalúa expresiones matemáticas dinámicamente
+    Similar a una calculadora científica
     """)
     
     try:
-        example_1_basic_metrics()
-        example_2_growth_rate()
-        example_3_moving_average()
-        example_4_outliers()
-        example_5_correlation()
-        example_6_aggregates()
-        example_7_percentiles()
+        example_1_basic_arithmetic()
+        example_2_complex_expressions()
+        example_3_trigonometry()
+        example_4_logarithms()
+        example_5_roots_and_powers()
+        example_6_rounding()
+        example_7_special_functions()
+        example_8_constants()
+        example_9_real_world()
+        example_10_help()
+        example_11_error_handling()
         
         print("\n" + "="*60)
         print("✅ Todos los ejemplos ejecutados correctamente")
         print("="*60)
+        print("\n💡 Uso rápido:")
+        print("  from tools.calculator import calc")
+        print("  result = calc('2 + 2')")
+        print("  print(result)  # 4")
         
     except Exception as e:
         print(f"\n❌ Error: {str(e)}")
-        print("\n⚠️ Asegúrate de:")
-        print("1. Tener scipy instalado: pip install scipy")
-        print("2. Tener pandas y numpy instalados")
