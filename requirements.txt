@@ -3,6 +3,7 @@
 # ========================================
 requests>=2.31.0
 python-dotenv>=1.0.0
+mcp>=0.9.0  # Model Context Protocol SDK
 
 # ========================================
 # 🗄️ DATABASE
