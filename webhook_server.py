@@ -276,34 +276,31 @@ async def download_audio_async(audio_url: str) -> Optional[str]:
         return None
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Monitoring"])
-async def health_check(agent: EvoDataAgent = Depends(get_agent)) -> HealthResponse:
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
+async def health_check():
     """
     Health check endpoint
     
-    - Verifica estado del agente
-    - Valida conexión a base de datos
-    - Retorna timestamp
+    Returns:
+        HealthResponse con estado del sistema
     """
-    from datetime import datetime
-    
     return HealthResponse(
         status="healthy",
         agent=config.AGENT_NAME,
         version=config.AGENT_VERSION,
-        database_connected=agent.db_connector.validate_connection(),
-        timestamp=datetime.now().isoformat()
+        database_connected=False,  # TODO: Implementar check real cuando tengamos MCP activo
+        timestamp=f"{time.time()}"
     )
 
 
 @app.get("/stats", tags=["Monitoring"])
-async def stats(agent: EvoDataAgent = Depends(get_agent)):
+async def stats():
     """Endpoint de estadísticas del agente"""
     return {
         "agent": config.AGENT_NAME,
         "version": config.AGENT_VERSION,
-        "db_connected": agent.db_connector.validate_connection(),
-        "tools": ["MCP Database Connector", "Visualizer", "Excel Generator"]
+        "db_connected": False,  # TODO: Implementar check MCP
+        "tools": ["Calculator", "Visualizer", "Excel Generator", "MCP Client"]
     }
 
 
