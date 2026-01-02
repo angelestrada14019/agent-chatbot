@@ -3,14 +3,17 @@
 Agente inteligente de análisis y automatización integrado con EvolutionAPI
 """
 from typing import Dict, Any, Optional, List
-import requests
-import pandas as pd
+import mimetypes  # ✅ Movido al inicio (estaba inline)
 import uuid
 from datetime import datetime
+
+import requests
+import pandas as pd
 from openai import OpenAI
+
 import config
 from utils.logger import get_logger
-from utils.response_formatter import ResponseFormatter
+from utils.response_formatter import ResponseFormatter, MessageTemplates  # ✅ Agregado MessageTemplates
 from tools.mcp_connector import get_connector
 from tools.visualizer import get_visualizer
 from tools.excel_generator import get_excel_generator
@@ -118,12 +121,18 @@ class EvoDataAgent:
         """
         logger.info("📊 Procesando consulta de datos...")
         
-        # Aquí deberías tener lógica para convertir lenguaje natural a SQL
-        # Por ahora, un ejemplo simple
-        sql_query = "SELECT * FROM ventas LIMIT 10"  # Placeholder
+        # TODO: Implementar lógica NLP para convertir lenguaje natural a SQL
+        # Por ahora retorna error indicando que se necesita implementar
+        return self.response_formatter.format_error_response(
+            error_message="Funcionalidad de consulta SQL desde lenguaje natural pendiente de implementar. Use ejemplos para testing.",
+            error_type="not_implemented",
+            details={"message": message},
+            request_id=request_id
+        )
         
-        # Ejecutar consulta
-        result = self.db_connector.execute_query(sql_query)
+        # --- Código futuro ---
+        # sql_query = convert_natural_language_to_sql(message)
+        # result = self.db_connector.execute_query(sql_query)
         
         if not result["success"]:
             return self.response_formatter.format_error_response(
@@ -202,7 +211,16 @@ class EvoDataAgent:
             filename = result["file_path"].split("\\")[-1]
             chart_url = f"{config.FILE_SERVER_URL}/{filename}"
         
-        description = f"📊 Aquí está tu gráfico de {chart_type} con {len(data)} registros."
+        # ✅ Usar MessageTemplates (ya importado al inicio)
+        columns_str = ", ".join(columns[:3]) if len(columns) <= 3 else f"{columns[0]}, {columns[1]}, ..."
+        description = MessageTemplates.visualization(
+            chart_type=chart_type,
+            row_count=len(data),
+            columns=columns_str
+        )
+        
+        if chart_url:
+            description += f"\n\n🔗 *Ver en línea:* {chart_url}"
         
         return self.response_formatter.format_visualization_response(
             chart_path=result["file_path"],
@@ -254,7 +272,15 @@ class EvoDataAgent:
         if config.FILE_DELIVERY_METHOD in ["both", "url"]:
             file_url = f"{config.FILE_SERVER_URL}/{result['filename']}"
         
-        description = "Tu archivo Excel está listo"
+        # ✅ Usar MessageTemplates (ya importado al inicio)
+        description = MessageTemplates.excel_export(
+            filename=result['filename'],
+            sheet_count=result['sheet_count'],
+            row_count=result['row_count']
+        )
+        
+        if file_url:
+            description += f"\n\n🔗 *Descargar:* {file_url}"
         
         return self.response_formatter.format_excel_response(
             file_path=result["file_path"],
@@ -283,6 +309,23 @@ class EvoDataAgent:
         Returns:
             Dict: Respuesta formateada
         """
+        # ✅ VALIDACIÓN DE INPUTS
+        if not is_voice and not message.strip():
+            logger.warning("⚠️ Mensaje vacío recibido")
+            return self.response_formatter.format_error_response(
+                error_message="El mensaje no puede estar vacío",
+                error_type="general",
+                request_id="invalid"
+            )
+        
+        if is_voice and not audio_path:
+            logger.warning("⚠️ Mensaje de voz sin audio_path")
+            return self.response_formatter.format_error_response(
+                error_message="Ruta de audio requerida para mensajes de voz",
+                error_type="voice",
+                request_id="invalid"
+            )
+        
         # Generar ID único para esta solicitud
         request_id = str(uuid.uuid4())
         
@@ -296,19 +339,15 @@ class EvoDataAgent:
             # Clasificar intención
             intent = IntentClassifier.classify(message)
             
-            # Obtener datos (ejemplo simple - deberías mejorar esto)
-            # En producción, aquí convertirías el mensaje a SQL
-            sql_query = "SELECT * FROM ventas LIMIT 100"  # Placeholder
-            query_result = self.db_connector.execute_query(sql_query)
-            
-            if not query_result["success"]:
-                return self.response_formatter.format_error_response(
-                    error_message=query_result["error"],
-                    error_type="database",
-                    request_id=request_id
-                )
-            
-            data = pd.DataFrame(query_result["data"])
+            # TODO: Obtener datos relevantes según el mensaje
+            # Necesita implementar lógica NLP->SQL
+            # Por ahora, usar ejemplos directos con herramientas
+            return self.response_formatter.format_error_response(
+                error_message="Por favor usa los ejemplos en examples/example_queries.py para testing. La conversión automática de lenguaje natural a SQL está pendiente.",
+                error_type="not_implemented",
+                details={"intent": intent, "message": message},
+                request_id=request_id
+            )
             
             # Procesar según intención
             if intent == "visualization":
@@ -380,7 +419,7 @@ class EvoDataAgent:
     
     def _send_attachment(self, phone_number: str, attachment: Dict[str, Any]) -> bool:
         """
-        Envía archivo adjunto por WhatsApp
+        Envía archivo adjunto por WhatsApp usando el endpoint correcto de EvolutionAPI
         
         Args:
             phone_number: Número de destino
@@ -390,34 +429,55 @@ class EvoDataAgent:
             bool: True si se envió correctamente
         """
         try:
-            # Determinar endpoint según tipo
-            if attachment["type"] == "image":
-                endpoint = "sendBase64"
-            elif attachment["type"] == "document":
-                endpoint = "sendBase64"
-            else:
-                return False
+            filename = attachment["filename"]
             
-            url = f"{config.EVOLUTION_URL}/message/{endpoint}/{config.EVOLUTION_INSTANCE}"
+            # Determinar mimetype (mimetypes ya importado al inicio)
+            mimetype = attachment.get("mimetype")
+            if not mimetype:
+                mimetype, _ = mimetypes.guess_type(filename)
+                if mimetype is None:
+                    # Default según tipo de archivo
+                    if attachment["type"] == "image":
+                        mimetype = "image/png"
+                    elif filename.endswith(".xlsx"):
+                        mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    elif filename.endswith(".pdf"):
+                        mimetype = "application/pdf"
+                    else:
+                        mimetype = "application/octet-stream"
+            
+            # Determinar mediatype para WhatsApp
+            if attachment["type"] == "image":
+                mediatype = "image"
+            else:
+                mediatype = "document"
+            
+            # ⭐ ENDPOINT CORRECTO (según envio_evolution.py que funciona)
+            url = f"{config.EVOLUTION_URL}/message/sendMedia/{config.EVOLUTION_INSTANCE}"
             headers = {
                 "Content-Type": "application/json",
                 "apikey": config.EVOLUTION_API_KEY
             }
             
+            # ⭐ PAYLOAD CORRECTO con todas las keys necesarias
             payload = {
                 "number": phone_number,
-                "options": {"delay": 1000},
-                "base64": attachment["data"],
-                "fileName": attachment["filename"]
+                "mediatype": mediatype,
+                "mimetype": mimetype,
+                "media": attachment["data"],  # ⭐ Key 'media' no 'base64'
+                "fileName": filename,
+                "caption": attachment.get("caption", ""),
+                "delay": 1000,
+                "linkPreview": False
             }
             
             resp = requests.post(url, json=payload, headers=headers)
             
             if resp.status_code not in (200, 201):
-                logger.error(f"❌ Error al enviar adjunto: {resp.status_code}")
+                logger.error(f"❌ Error al enviar adjunto: {resp.status_code} - {resp.text}")
                 return False
             
-            logger.info(f"✅ Adjunto enviado: {attachment['filename']}")
+            logger.info(f"✅ Adjunto enviado: {filename}")
             return True
         
         except Exception as e:
@@ -425,13 +485,6 @@ class EvoDataAgent:
             return False
 
 
-# Example usage
-if __name__ == "__main__":
-    # Inicializar agente
-    agent = EvoDataAgent()
-    
-    # Procesar mensaje de ejemplo
-    response = agent.process_message("Muéstrame las ventas de este mes")
-    
-    # Mostrar respuesta
-    print(ResponseFormatter.to_json(response, pretty=True))
+
+# Entry point removed - use webhook_server.py or examples/ for testing
+

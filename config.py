@@ -72,12 +72,15 @@ MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "25"))  # WhatsApp limit
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "10"))
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # seconds
 
+# NOTE: Las siguientes constantes est\u00e1n disponibles para uso futuro
+# pero actualmente no se usan en el c\u00f3digo
+
 # Allowed SQL keywords (whitelist approach for safety)
-ALLOWED_SQL_KEYWORDS = [
-    "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
-    "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET", "AS", "ON",
-    "AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "IS", "NULL"
-]
+# ALLOWED_SQL_KEYWORDS = [
+#     "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
+#     "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET", "AS", "ON",
+#     "AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "IS", "NULL"
+# ]
 
 # Forbidden SQL keywords (blacklist for destructive operations)
 FORBIDDEN_SQL_KEYWORDS = [
@@ -96,9 +99,15 @@ LOG_BACKUP_COUNT = 5
 # ========================================
 # 🌐 FILE DELIVERY SETTINGS
 # ========================================
-# Dual delivery: both attachments and URLs
-FILE_DELIVERY_METHOD = os.getenv("FILE_DELIVERY_METHOD", "both")  # both, attachment, url
-FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", "http://localhost:8000/exports")  # Base URL for file downloads
+# FILE_DELIVERY_METHOD can be: "both", "attachment", "url"
+FILE_DELIVERY_METHOD = os.getenv("FILE_DELIVERY_METHOD", "both")
+FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", "http://localhost:8000/exports")
+
+# ========================================
+# 🔌 SERVER PORTS
+# ========================================
+WEBHOOK_SERVER_PORT = int(os.getenv("WEBHOOK_SERVER_PORT", "5000"))
+FILE_SERVER_PORT = int(os.getenv("FILE_SERVER_PORT", "8000"))
 
 # ========================================
 # 🧠 AGENT BEHAVIOR

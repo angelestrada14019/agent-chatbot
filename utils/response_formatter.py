@@ -7,6 +7,80 @@ from datetime import datetime
 import json
 import config
 
+
+class MessageTemplates:
+    """
+    Plantillas de mensajes profesionales con emojis
+    Inspirado en app_evolution.py para formato WhatsApp
+    """
+    
+    @staticmethod
+    def query_result(row_count: int, execution_time: float, preview: str = "") -> str:
+        """Template para resultados de consulta"""
+        return (
+            f"📊 *Consulta Ejecutada*\n\n"
+            f"📝 *Registros encontrados:* {row_count:,}\n"
+            f"⏱️ *Tiempo de ejecución:* {execution_time:.2f}s\n\n"
+            f"{preview}"
+        )
+    
+    @staticmethod
+    def visualization(chart_type: str, row_count: int, columns: str = "") -> str:
+        """Template para visualizaciones"""
+        msg = (
+            f"📈 *Gráfico Generado*\n\n"
+            f"🎨 *Tipo:* {chart_type.title()}\n"
+            f"📊 *Datos analizados:* {row_count:,} registros\n"
+        )
+        if columns:
+            msg += f"📋 *Columnas:* {columns}\n"
+        msg += f"\n✅ El gráfico está listo y se envía adjunto."
+        return msg
+    
+    @staticmethod
+    def excel_export(filename: str, sheet_count: int, row_count: int) -> str:
+        """Template para exportación Excel"""
+        return (
+            f"📊 *Reporte Excel Generado*\n\n"
+            f"📄 *Archivo:* {filename}\n"
+            f"📑 *Hojas:* {sheet_count}\n"
+            f"📝 *Registros totales:* {row_count:,}\n\n"
+            f"✅ *Estado:* Listo para descargar"
+        )
+    
+    @staticmethod
+    def error(error_type: str, suggestion: str = "") -> str:
+        """Template para errores"""
+        friendly_messages = {
+            "database": "No pude conectarme a la base de datos. Por favor intenta más tarde.",
+            "query": "Hubo un problema al ejecutar la consulta. Verifica los parámetros.",
+            "visualization": "No pude generar el gráfico. Verifica que los datos sean correctos.",
+            "excel": "Error al generar el archivo Excel. Intenta de nuevo.",
+            "voice": "No pude procesar el audio. Envía un mensaje de texto o intenta de nuevo.",
+        }
+        
+        msg = f"❌ *Error*\n\n"
+        msg += f"⚠️ {friendly_messages.get(error_type, 'Ocurrió un error inesperado')}\n"
+        
+        if suggestion:
+            msg += f"\n💡 *Sugerencia:* {suggestion}"
+        
+        return msg
+    
+    @staticmethod
+    def greeting() -> str:
+        """Template de bienvenida"""
+        return (
+            f"👋 *Hola, soy {config.AGENT_NAME}*\n\n"
+            f"Puedo ayudarte con:\n"
+            f"📊 Consultas de datos\n"
+            f"📈 Gráficos y visualizaciones\n"
+            f"📁 Reportes en Excel\n"
+            f"💬 Análisis de información\n\n"
+            f"¿En qué te puedo ayudar hoy?"
+        )
+
+
 class ResponseFormatter:
     """Formateador de respuestas estandarizado"""
     
