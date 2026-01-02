@@ -37,7 +37,7 @@ class MCPClient(Tool):
         Inicializa cliente MCP
         
         Args:
-            config_path: Path al archivo de configuración mcp_servers.json
+            config_path: DEPRECATED - Se construye config desde variables de entorno
         """
         super().__init__("MCPClient")
         
@@ -49,34 +49,31 @@ class MCPClient(Tool):
         
         self.sessions: Dict[str, ClientSession] = {}
         self.server_configs: Dict[str, Dict] = {}
-        self.config_path = config_path or str(Path(__file__).parent.parent / "mcp_servers.json")
         
-        # Cargar configuración de servidores
-        self._load_server_configs()
+        # Construir configuración desde variables de entorno
+        self._build_server_configs_from_env()
     
-    def _load_server_configs(self):
-        """Carga configuración de servidores MCP desde JSON"""
-        try:
-            with open(self.config_path, 'r') as f:
-                config_data = json.load(f)
-                self.server_configs = config_data.get("mcpServers", {})
-                self.logger.info(f"✅ Configuración MCP cargada: {len(self.server_configs)} servidores")
-        except FileNotFoundError:
-            self.logger.warning(f"⚠️ No se encontró {self.config_path}, usando configuración por defecto")
-            self._create_default_config()
-        except Exception as e:
-            self.logger.error(f"❌ Error cargando configuración MCP: {str(e)}")
-            raise
-    
-    def _create_default_config(self):
-        """Crea configuración por defecto"""
+    def _build_server_configs_from_env(self):
+        """Construye configuración de servidores MCP desde variables de entorno"""
+        import config as cfg
+        
+        # Configuración del servidor PostgreSQL MCP
         self.server_configs = {
             "postgres": {
                 "command": "python",
                 "args": ["mcp-server/server.py"],
-                "env": {}
+                "env": {
+                    "DB_HOST": cfg.DB_HOST,
+                    "DB_PORT": str(cfg.DB_PORT),
+                    "DB_NAME": cfg.DB_NAME,
+                    "DB_USER": cfg.DB_USER or "postgres",
+                    "DB_PASSWORD": cfg.DB_PASSWORD or "postgres"
+                }
             }
         }
+        
+        self.logger.info(f"✅ Configuración MCP construida desde variables de entorno")
+        self.logger.info(f"📋 Servidores disponibles: {list(self.server_configs.keys())}")
     
     async def connect_to_server(self, server_name: str) -> Dict[str, Any]:
         """
