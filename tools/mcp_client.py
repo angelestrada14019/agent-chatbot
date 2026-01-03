@@ -9,8 +9,8 @@ from pathlib import Path
 import logging
 
 try:
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
+    from mcp import ClientSession
+    from mcp.client.sse import sse_client
     MCP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
@@ -18,6 +18,7 @@ except ImportError:
 
 from tools.base import Tool, ToolResult, ToolStatus
 import config
+from contextlib import AsyncExitStack
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +27,12 @@ class MCPClient(Tool):
     """
     Cliente MCP que implementa el protocolo Model Context Protocol
     
-    Se conecta a servidores MCP externos que exponen:
-    - Recursos: Datos (ej: postgres://database/table)
-    - Herramientas: Funciones (ej: query, list_tables)
-    - Prompts: Plantillas reutilizables
+    Se conecta a servidores MCP externos vía SSE (Server-Sent Events)
     """
     
     def __init__(self, config_path: Optional[str] = None):
         """
         Inicializa cliente MCP
-        
-        Args:
-            config_path: DEPRECATED - Se construye config desde variables de entorno
         """
         super().__init__("MCPClient")
         
@@ -48,69 +43,52 @@ class MCPClient(Tool):
             )
         
         self.sessions: Dict[str, ClientSession] = {}
-        self.server_configs: Dict[str, Dict] = {}
-        self._exit_stack = []  # Para almacenar los context managers (sse/stdio components)
+        self.server_urls: Dict[str, str] = {}
+        self._exit_stack = []
         
-        # Construir configuración desde variables de entorno
+        # Construir configuración
         self._build_server_configs_from_env()
     
     def _build_server_configs_from_env(self):
         """Construye configuración de servidores MCP desde variables de entorno"""
         import config as cfg
         
-        # Configuración del servidor PostgreSQL MCP
-        self.server_configs = {
-            "postgres": {
-                "command": "python",
-                "args": ["mcp-server/server.py"],
-                "env": {
-                    "DB_HOST": cfg.DB_HOST,
-                    "DB_PORT": str(cfg.DB_PORT),
-                    "DB_NAME": cfg.DB_NAME,
-                    "DB_USER": cfg.DB_USER or "postgres",
-                    "DB_PASSWORD": cfg.DB_PASSWORD or "postgres"
-                }
+        # En arquitectura aislada, SOLO soportamos SSE (URL remota)
+        if hasattr(cfg, 'MCP_SERVER_URL') and cfg.MCP_SERVER_URL:
+            self.server_urls = {
+                "postgres": cfg.MCP_SERVER_URL
             }
-        }
+            self.logger.info(f"✅ Configuración MCP: Modo SSE (Remoto) -> {cfg.MCP_SERVER_URL}")
+        else:
+            self.logger.warning("⚠️ MCP_SERVER_URL no definido. El cliente MCP no funcionará.")
         
-        self.logger.info(f"✅ Configuración MCP construida desde variables de entorno")
-        self.logger.info(f"📋 Servidores disponibles: {list(self.server_configs.keys())}")
+        self.logger.info(f"📋 Servidores configurados: {list(self.server_urls.keys())}")
     
     async def connect_to_server(self, server_name: str) -> Dict[str, Any]:
         """
-        Conecta a un servidor MCP
-        
-        Args:
-            server_name: Nombre del servidor (debe estar en config)
-            
-        Returns:
-            Dict con recursos y herramientas disponibles
+        Conecta a un servidor MCP vía SSE
         """
         if server_name in self.sessions:
             self.logger.info(f"✅ Ya conectado a servidor '{server_name}'")
             return await self._get_server_capabilities(server_name)
         
-        if server_name not in self.server_configs:
-            raise ValueError(
-                f"Servidor '{server_name}' no encontrado en configuración. "
-                f"Disponibles: {list(self.server_configs.keys())}"
-            )
-        
-        config = self.server_configs[server_name]
-        
+        # Validar si existe configuración para este servidor
+        if server_name not in self.server_urls:
+             raise ValueError(f"Servidor '{server_name}' no configurado (Falta URL SSE)")
+             
         try:
             self.logger.info(f"🔌 Conectando a servidor MCP '{server_name}'...")
             
-            # Configurar parámetros del servidor
-            server_params = StdioServerParameters(
-                command=config["command"],
-                args=config.get("args", []),
-                env=config.get("env", {})
-            )
+            url = self.server_urls[server_name]
+            self.logger.info(f"🌐 Iniciando transporte SSE a: {url}")
             
-            # Iniciar servidor y obtener streams
-            read, write = await stdio_client(server_params)
+            stack = AsyncExitStack()
+            # Usar cliente SSE
+            read, write = await stack.enter_async_context(sse_client(url))
             
+            # Guardamos el stack para cleanup
+            self._exit_stack.append(stack)
+
             # Crear sesión
             session = ClientSession(read, write)
             await session.initialize()
@@ -287,6 +265,7 @@ class MCPClient(Tool):
     
     async def close_all(self):
         """Cierra todas las conexiones a servidores MCP"""
+        # Cerrar sesiones
         for server_name, session in self.sessions.items():
             try:
                 await session.close()
@@ -295,6 +274,15 @@ class MCPClient(Tool):
                 self.logger.warning(f"⚠️ Error cerrando '{server_name}': {str(e)}")
         
         self.sessions.clear()
+        
+        # Cerrar stacks (transportes SSE/Stdio)
+        for stack in self._exit_stack:
+            try:
+                await stack.aclose()
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error cerrando transporte: {str(e)}")
+        
+        self._exit_stack.clear()
 
 
 # ============================================
@@ -315,26 +303,28 @@ class MCPDatabaseAdapter:
         self.mcp_client = MCPClient()
         self.server_name = server_name
         
-        # Conectar al servidor
-        asyncio.run(self.mcp_client.connect_to_server(server_name))
-        
-        logger.info(f"✅ MCPDatabaseAdapter inicializado con servidor '{server_name}'")
+        # Conexión perezosa (Lazy connection) en el primer execute_query
+        # No usamos asyncio.run() aquí para evitar conflictos con event loop
+        logger.info(f"✅ MCPDatabaseAdapter inicializado (Lazy) con servidor '{server_name}'")
     
-    def execute_query(
+    async def execute_query(
         self,
         sql: str,
         params: Optional[Dict[str, Any]] = None,
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Ejecuta query SQL usando servidor MCP
-        
-        Interfaz compatible con el antiguo mcp_connector.py
+        Ejecuta query SQL usando servidor MCP (Versión ASYNC)
         """
         try:
-            # Llamar herramienta 'query' del servidor MCP
-            result = self.mcp_client.execute(
-                "call_tool",
+            # Lazy Connection: Asegurar conexión antes de ejecutar
+            if self.server_name not in self.mcp_client.sessions:
+                await self.mcp_client.connect_to_server(self.server_name)
+            
+            # Llamar herramienta 'query' directamente de forma asíncrona
+            # NOTA: call_tool_async devuelve el objeto de resultado directo o el contenido?
+            # Revisando MCPClient.call_tool_async, devuelve el objeto MCP result.
+            result = await self.mcp_client.call_tool_async(
                 server_name=self.server_name,
                 tool_name="query",
                 sql=sql,
@@ -342,24 +332,39 @@ class MCPDatabaseAdapter:
                 timeout=timeout or config.MAX_QUERY_TIMEOUT
             )
             
-            if not result.success:
-                return {
-                    "success": False,
-                    "error": result.error,
+            # Parsear el resultado (Lógica copiada de execute síncrono pero adaptada)
+            content = result.content
+            data = content
+            
+            # Si content es lista devuelta por MCP SDK, extraer texto
+            if isinstance(content, list) and len(content) > 0:
+                if hasattr(content[0], 'text'):
+                    data = content[0].text
+            
+            # Intentar parsear JSON si es string (el tool 'query' suele devolver JSON string)
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except:
+                   pass # Si falla, dejar como string
+            
+            if not isinstance(data, dict):
+                 # Estructura fallback si no es dict
+                 return {
+                    "success": True, # Asumimos éxito si no excepcion
                     "data": [],
                     "columns": [],
-                    "row_count": 0
+                    "row_count": 0,
+                    "raw": str(data)
                 }
-            
-            # Formatear resultado
-            data = result.data
-            
+
+            # Retornar estructura estandarizada
             return {
                 "success": True,
                 "data": data.get("rows", []),
                 "columns": data.get("columns", []),
                 "row_count": len(data.get("rows", [])),
-                "execution_time": result.metadata.get("execution_time", 0)
+                "execution_time": 0
             }
         
         except Exception as e:

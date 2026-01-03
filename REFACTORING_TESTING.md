@@ -92,8 +92,8 @@ python file_server.py
 ```
 
 **Verificar**:
-- Puerto 8000 abierto
-- `/docs` accesible en http://localhost:8000/docs
+- Puerto 8001 abierto
+- `/docs` accesible en http://localhost:8001/docs
 
 ---
 

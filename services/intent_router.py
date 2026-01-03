@@ -99,9 +99,9 @@ class IntentRouter:
         
         logger.info("✅ IntentRouter inicializado (Conectado vía MCP)")
     
-    def route_message(self, message: str, request_id: str) -> Dict[str, Any]:
+    async def route_message(self, message: str, request_id: str) -> Dict[str, Any]:
         """
-        Enruta mensaje a su handler apropiado
+        Enruta mensaje a su handler apropiado (Async)
         
         Args:
             message: Mensaje del usuario
@@ -125,7 +125,7 @@ class IntentRouter:
         handler = handlers.get(intent, self._handle_query)
         
         try:
-            return handler(message, request_id)
+            return await handler(message, request_id)
         except Exception as e:
             logger.error(f"❌ Error en handler de {intent}: {str(e)}")
             return self.response_formatter.format_error_response(
@@ -134,14 +134,14 @@ class IntentRouter:
                 request_id=request_id
             )
     
-    def _handle_query(self, message: str, request_id: str) -> Dict[str, Any]:
-        """Handler para consultas de datos simples"""
+    async def _handle_query(self, message: str, request_id: str) -> Dict[str, Any]:
+        """Handler para consultas de datos simples (Async)"""
         logger.info("📊 Procesando consulta de datos...")
         
         # Mapeo simple NLP -> SQL (para demo)
         if "ventas" in message.lower():
             sql = "SELECT * FROM ventas ORDER BY fecha DESC LIMIT 10"
-            result = self.db_connector.execute_query(sql)
+            result = await self.db_connector.execute_query(sql)
             
             if result["success"]:
                 # Formatear tabla simple
@@ -156,7 +156,7 @@ class IntentRouter:
         
         elif "productos" in message.lower():
             sql = "SELECT * FROM productos LIMIT 10"
-            result = self.db_connector.execute_query(sql)
+            result = await self.db_connector.execute_query(sql)
              
             if result["success"]:
                  df = pd.DataFrame(result["data"])
@@ -174,19 +174,20 @@ class IntentRouter:
             request_id=request_id
         )
     
-    def _handle_visualization(self, message: str, request_id: str) -> Dict[str, Any]:
+    async def _handle_visualization(self, message: str, request_id: str) -> Dict[str, Any]:
         """Handler para visualizaciones"""
-        return self._handle_analysis(message, request_id)  # Reutilizar lógica de análisis
+        return await self._handle_analysis(message, request_id)  # Reutilizar lógica de análisis
     
-    def _handle_export(self, message: str, request_id: str) -> Dict[str, Any]:
+    async def _handle_export(self, message: str, request_id: str) -> Dict[str, Any]:
         """Handler para exportación Excel"""
-        return self._handle_analysis(message, request_id)
+        return await self._handle_analysis(message, request_id)
     
-    def _handle_calculation(self, message: str, request_id: str) -> Dict[str, Any]:
+    async def _handle_calculation(self, message: str, request_id: str) -> Dict[str, Any]:
         """Handler para cálculos"""
         logger.info("🧮 Procesando solicitud de cálculo...")
         
         try:
+            # Calculator es síncrono (tool local pura), no requiere await
             result = self.calculator.calculate(message)
             return {
                 "success": True,
@@ -201,9 +202,9 @@ class IntentRouter:
                 request_id=request_id
             )
     
-    def _handle_analysis(self, message: str, request_id: str) -> Dict[str, Any]:
+    async def _handle_analysis(self, message: str, request_id: str) -> Dict[str, Any]:
         """
-        Handler completo para análisis (Query -> Chart -> Excel)
+        Handler completo para análisis (Query -> Chart -> Excel) (Async)
         Workflow solicitado por usuario: "ventas trimestre + grafica tendencia + excel"
         """
         logger.info("📊 Procesando flujo completo de análisis (MCP -> Viz -> Excel)...")
@@ -212,16 +213,16 @@ class IntentRouter:
         # -----------------------------
         sql = "SELECT fecha, producto, cantidad, precio, (cantidad * precio) as total FROM ventas WHERE fecha >= '2024-01-01' ORDER BY fecha ASC"
         
-        db_result = self.db_connector.execute_query(sql)
+        result = await self.db_connector.execute_query(sql)
         
-        if not db_result["success"]:
+        if not result["success"]:
             return self.response_formatter.format_error_response(
-                error_message=f"Error consultando datos: {db_result.get('error')}",
+                error_message=f"Error consultando datos: {result.get('error')}",
                 error_type="db_error",
                 request_id=request_id
             )
             
-        data = db_result["data"]
+        data = result["data"]
         df = pd.DataFrame(data)
         
         if df.empty:
@@ -237,6 +238,7 @@ class IntentRouter:
         files = []
         
         # Gráfico de Tendencia (Línea de tiempo)
+        # Visualizer es síncrono (CPU bound, se podría envolver en loop.run_in_executor pero por ahora ok)
         chart_result = self.visualizer.create_line_chart(
             data=df,
             x_column="fecha",
@@ -249,6 +251,7 @@ class IntentRouter:
             
         # 3. Generación de Excel (ExcelGenerator)
         # -------------------------------------
+        # ExcelGenerator es síncrono (Disk/CPU bound)
         excel_result = self.excel_generator.create_excel_from_data(
             data=df,
             filename=f"reporte_ventas_{datetime.now().strftime('%Y%m%d')}",

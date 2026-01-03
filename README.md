@@ -82,7 +82,7 @@ EVOLUTION_API_KEY=123456.+az154721ww
 
 # Server Ports
 WEBHOOK_SERVER_PORT=5000
-FILE_SERVER_PORT=8000
+FILE_SERVER_PORT=8001
 ```
 
 ---
@@ -125,8 +125,8 @@ python webhook_server.py
 
 # Terminal 2: File server (sirve archivos generados)
 python file_server.py
-# Servidor en http://localhost:8000
-# Docs en http://localhost:8000/docs
+# Servidor en http://localhost:8001
+# Docs en http://localhost:8001/docs
 ```
 
 ### Configurar Webhook en EvolutionAPI
@@ -314,7 +314,7 @@ El `webhook_server.py` maneja automáticamente:
 | `/docs` | GET | Documentación Swagger UI |
 | `/redoc` | GET | Documentación ReDoc |
 
-### File Server (Puerto 8000)
+### File Server (Puerto 8001)
 
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|

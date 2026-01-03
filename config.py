@@ -101,13 +101,13 @@ LOG_BACKUP_COUNT = 5
 # ========================================
 # FILE_DELIVERY_METHOD can be: "both", "attachment", "url"
 FILE_DELIVERY_METHOD = os.getenv("FILE_DELIVERY_METHOD", "both")
-FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", "http://localhost:8000/exports")
+FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", "http://localhost:8001/exports")
 
 # ========================================
 # 🔌 SERVER PORTS
 # ========================================
 WEBHOOK_SERVER_PORT = int(os.getenv("WEBHOOK_SERVER_PORT", "5000"))
-FILE_SERVER_PORT = int(os.getenv("FILE_SERVER_PORT", "8000"))
+FILE_SERVER_PORT = int(os.getenv("FILE_SERVER_PORT", "8001"))
 
 # ========================================
 # 🧠 AGENT BEHAVIOR

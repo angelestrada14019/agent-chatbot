@@ -208,8 +208,8 @@ async def process_voice_message(agent: EvoDataAgent, phone_number: str, audio_ur
             })
             return
         
-        # Procesar con Whisper
-        response = agent.process_message(
+        # Procesar con Whisper (Async)
+        response = await agent.process_message(
             "",
             is_voice=True,
             audio_path=audio_path
@@ -226,8 +226,8 @@ async def process_voice_message(agent: EvoDataAgent, phone_number: str, audio_ur
 async def process_text_message(agent: EvoDataAgent, phone_number: str, text: str):
     """Procesa mensaje de texto en background"""
     try:
-        # Procesar mensaje
-        response = agent.process_message(text)
+        # Procesar mensaje (Async)
+        response = await agent.process_message(text)
         
         # Enviar respuesta
         agent.send_whatsapp_message(phone_number, response)

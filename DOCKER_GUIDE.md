@@ -34,7 +34,7 @@ Esto levanta:
 - ✅ **PostgreSQL** (puerto 5432)
 - ✅ **MCP Server** (interno, comunicación stdio)
 - ✅ **Webhook Server** (puerto 5000)
-- ✅ **File Server** (puerto 8000)
+- ✅ **File Server** (puerto 8001)
 
 ### 3. Verificar logs
 
@@ -55,12 +55,12 @@ docker-compose logs -f postgres
 curl http://localhost:5000/health
 
 # Health check del file server
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Documentación API
 # Abrir en navegador:
 http://localhost:5000/docs
-http://localhost:8000/docs
+http://localhost:8001/docs
 ```
 
 ---
@@ -87,7 +87,7 @@ http://localhost:8000/docs
 │                                                      │
 │  ┌───────────────────────────────────────────┐      │
 │  │         File Server                        │      │
-│  │         (port 8000)                       │      │
+│  │         (port 8001)                       │      │
 │  │  - Sirve archivos generados               │      │
 │  └───────────────────────────────────────────┘      │
 └─────────────────────────────────────────────────────┘
@@ -325,7 +325,7 @@ docker-compose build --no-cache webhook-server
 curl http://localhost:5000/health
 
 # File Server
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # PostgreSQL (dentro del contenedor)
 docker exec evodata-postgres pg_isready -U postgres
@@ -429,8 +429,9 @@ Checklist después de `docker-compose up -d`:
 - [ ] PostgreSQL corriendo: `docker-compose ps postgres`
 - [ ] MCP Server corriendo: `docker-compose ps mcp-server`
 - [ ] Webhook Server respondiendo: `curl http://localhost:5000/health`
-- [ ] File Server respondiendo: `curl http://localhost:8000/health`
-- [ ] Docs accesibles: `http://localhost:5000/docs`
+- ✅ **File Server** (puerto 8001)
+- [ ] File Server respondiendo: `curl http://localhost:8001/health`
+- [ ] Docs accesibles: `http://localhost:8001/docs`
 - [ ] Base de datos con datos: `docker exec evodata-postgres psql -U postgres -d analytics -c "SELECT COUNT(*) FROM ventas;"`
 
 **¡Sistema completo con MCP real funcionando en Docker!** 🚀

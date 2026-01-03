@@ -42,24 +42,16 @@ class EvoDataAgent:
         logger.info(f"🤖 {config.AGENT_NAME} v{config.AGENT_VERSION} inicializado")
         logger.info("✅ Arquitectura refactorizada con servicios (SOLID)")
     
-    def process_message(
+    async def process_message(
         self,
         message: str,
         is_voice: bool = False,
         audio_path: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Procesa mensaje del usuario (texto o voz)
+        Procesa mensaje del usuario (texto o voz) (Async)
         
         REFACTORIZADO: Delega validación y procesamiento a servicios
-        
-        Args:
-            message: Mensaje de texto del usuario
-            is_voice: Si True, es mensaje de voz
-            audio_path: Path del audio (si is_voice=True)
-            
-        Returns:
-            Dict: Respuesta formateada
         """
         # Generar ID único para esta solicitud
         request_id = str(uuid.uuid4())
@@ -68,6 +60,7 @@ class EvoDataAgent:
             # Si es voz, delegar a MessageProcessor
             if is_voice and audio_path:
                 logger.info(f"🎤 Procesando mensaje de voz (request_id: {request_id})")
+                # MessageProcessor sigue siendo síncrono (OpenAI calls), no problem
                 message = self.message_processor.process_voice_message(audio_path)
             
             # Validar mensaje de texto
@@ -84,8 +77,8 @@ class EvoDataAgent:
             
             logger.log_request(request_id, "user", message)
             
-            # Delegar routing a IntentRouter
-            response = self.intent_router.route_message(message, request_id)
+            # Delegar routing a IntentRouter (Async)
+            response = await self.intent_router.route_message(message, request_id)
             
             logger.log_response(
                 request_id,

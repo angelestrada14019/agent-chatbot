@@ -5,6 +5,7 @@ WORKDIR /app
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar requirements
@@ -19,8 +20,11 @@ COPY . .
 # Crear directorios necesarios
 RUN mkdir -p logs exports temp
 
-# Exponer puerto
-EXPOSE 5000
+# Dar permisos al entrypoint
+RUN chmod +x entrypoint.sh
 
-# Comando para ejecutar webhook server
-CMD ["python", "webhook_server.py"]
+# Exponer puertos
+EXPOSE 5000 8001
+
+# Comando de inicio usando el script
+ENTRYPOINT ["./entrypoint.sh"]
