@@ -141,11 +141,12 @@ async def evolution_webhook(
 
     # Ignorar mensajes enviados por el propio bot para evitar bucles infinitos
     if from_me:
-        logger.debug(f"⏭️ Ignorando mensaje enviado por el bot (ID: {key.get('id')})")
+        logger.info(f"⏭️ Ignorando mensaje enviado por el bot (fromMe=True, ID: {key.get('id')})")
         return WebhookResponse(status="ignored", action="message_from_me")
     
     # Fallback si el anidamiento es diferente (algunas versiones de v2)
     if not key and 'key' in payload.dict():
+        logger.info("ℹ️ Usando fallback para extraer key/message de payload")
         key = payload.key.dict() if hasattr(payload.key, 'dict') else payload.key
         message_content = payload.message.dict() if hasattr(payload.message, 'dict') else payload.message
         message_type = payload.messageType

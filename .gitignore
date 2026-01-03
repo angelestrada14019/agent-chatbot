@@ -6,3 +6,9 @@ logs/webhook_debug.json
 /logs
 /exports
 /temp
+diag_output_final.txt
+diag_output_v2.txt
+diag_output_v3.txt
+diag_output_v4.txt
+diag_output.txt
+force_output.txt

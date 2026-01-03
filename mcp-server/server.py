@@ -139,30 +139,45 @@ app = FastAPI(lifespan=lifespan)
 
 from fastapi import Response
 
-class HandledResponse(Response):
-    """Respuesta que no hace nada, delegando todo al transport de MCP"""
-    async def __call__(self, scope, receive, send):
-        pass
-
 @app.get("/sse")
 async def handle_sse(request: Request):
     """Endpoint para la conexión SSE"""
     # Usar el send directamente del scope para máxima compatibilidad
-    send_callable = request.scope.get("send")
-    async with sse_transport.connect_sse(
-        request.scope, request.receive, send_callable
-    ) as stream:
-        await mcp.run(
-            stream[0], stream[1], mcp.create_initialization_options()
-        )
-    return HandledResponse()
+    scope = request.scope
+    receive = request.receive
+    send = scope.get("send")
+    
+    if send is None:
+        logger.error("❌ El scope de FastAPI no tiene el callable 'send'")
+        return Response("Internal Server Error", status_code=500)
+
+    try:
+        async with sse_transport.connect_sse(scope, receive, send) as stream:
+            await mcp.run(
+                stream[0], stream[1], mcp.create_initialization_options()
+            )
+    except Exception as e:
+        logger.error(f"❌ Error en session SSE: {str(e)}")
+        # No relanzar para evitar crash del worker
+        
+    return Response()
 
 @app.post("/messages")
 async def handle_messages(request: Request):
     """Endpoint para recibir mensajes del cliente (POST)"""
-    send_callable = request.scope.get("send")
-    await sse_transport.handle_post_message(request.scope, request.receive, send_callable)
-    return HandledResponse()
+    scope = request.scope
+    receive = request.receive
+    send = scope.get("send")
+    
+    if send is None:
+        return Response("Internal Server Error", status_code=500)
+
+    try:
+        await sse_transport.handle_post_message(scope, receive, send)
+    except Exception as e:
+        logger.error(f"❌ Error en handle_messages (POST): {str(e)}")
+        
+    return Response()
 
 if __name__ == "__main__":
     import uvicorn
