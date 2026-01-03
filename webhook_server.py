@@ -11,6 +11,8 @@ import requests
 from pathlib import Path
 from functools import lru_cache
 import time
+import json
+import os
 
 from evodata_agent import EvoDataAgent
 from utils.logger import get_logger
@@ -64,19 +66,18 @@ class WhatsAppMessage(BaseModel):
     audioMessage: Optional[Dict[str, Any]] = None
 
 class EvolutionWebhookPayload(BaseModel):
-    """Payload del webhook de EvolutionAPI"""
-    key: WhatsAppKey
-    message: WhatsAppMessage
-    messageType: str
+    """Payload del webhook de EvolutionAPI (v2 compatible)"""
+    event: Optional[str] = None
+    instance: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    
+    # Soporte para v1 (retrocompatibilidad)
+    key: Optional[WhatsAppKey] = None
+    message: Optional[WhatsAppMessage] = None
+    messageType: Optional[str] = None
     
     class Config:
-        schema_extra = {
-            "example": {
-                "key": {"remoteJid": "573124488445@s.whatsapp.net"},
-                "message": {"conversation": "Muéstrame las ventas"},
-                "messageType": "conversation"
-            }
-        }
+        extra = "allow"
 
 class WebhookResponse(BaseModel):
     """Respuesta del webhook"""
@@ -121,44 +122,73 @@ async def evolution_webhook(
     """
     logger.info("📩 Webhook recibido")
     
+    # Debug: Guardar payload raw para diagnóstico
+    try:
+        debug_file = Path(config.LOGS_DIR) / "webhook_debug.json"
+        with open(debug_file, "a") as f:
+            f.write(json.dumps(payload.dict(), default=str) + "\n")
+    except Exception as e:
+        logger.error(f"❌ Error al escribir log debug: {str(e)}")
+
+    # Extraer datos (manejar anidamiento de v2)
+    data = payload.data if payload.data else payload.dict()
+    
+    # Extraer campos clave del objeto de datos
+    key = data.get('key', {})
+    message_content = data.get('message', {})
+    message_type = data.get('messageType')
+    from_me = key.get('fromMe', False) if isinstance(key, dict) else getattr(key, 'fromMe', False)
+
+    # Ignorar mensajes enviados por el propio bot para evitar bucles infinitos
+    if from_me:
+        logger.debug(f"⏭️ Ignorando mensaje enviado por el bot (ID: {key.get('id')})")
+        return WebhookResponse(status="ignored", action="message_from_me")
+    
+    # Fallback si el anidamiento es diferente (algunas versiones de v2)
+    if not key and 'key' in payload.dict():
+        key = payload.key.dict() if hasattr(payload.key, 'dict') else payload.key
+        message_content = payload.message.dict() if hasattr(payload.message, 'dict') else payload.message
+        message_type = payload.messageType
+
     # Extraer número de teléfono
-    remote_jid = payload.key.remoteJid
+    remote_jid = key.get('remoteJid') if isinstance(key, dict) else getattr(key, 'remoteJid', None)
+    
     if not remote_jid:
-        raise HTTPException(status_code=400, detail="remoteJid faltante")
+        logger.warning(f"⚠️ Webhook sin remoteJid. Evento: {payload.event}")
+        return WebhookResponse(status="ignored", action="no_remote_jid")
     
     # Convertir formato de número
     phone_number = remote_jid.replace('@s.whatsapp.net', '@c.us')
-    message_type = payload.messageType
     
     logger.info(f"📱 Mensaje de {phone_number} (tipo: {message_type})")
     
     # Procesar mensaje según tipo
     if message_type == 'audioMessage':
         # Audio
-        audio_data = payload.message.audioMessage or {}
-        audio_url = audio_data.get('url')
+        audio_data = message_content.get('audioMessage') if isinstance(message_content, dict) else getattr(message_content, 'audioMessage', {})
+        audio_url = audio_data.get('url') if audio_data else None
         
         if not audio_url:
             raise HTTPException(status_code=400, detail="Audio sin URL")
         
-        logger.info(f"🎤 Procesando mensaje de voz desde {audio_url}")
+        logger.info(f"🎤 Procesando mensaje de voz (ID: {key.get('id')})")
         
         # Procesar en background
         background_tasks.add_task(
             process_voice_message,
             agent,
             phone_number,
-            audio_url
+            key # Pasar el key completo para fetch_media
         )
         
         return WebhookResponse(status="processing", action="voice_to_text")
     
     elif message_type in ['conversation', 'extendedTextMessage']:
         # Texto
-        text = (
-            payload.message.conversation or
-            (payload.message.extendedTextMessage or {}).get('text', '')
-        )
+        if isinstance(message_content, dict):
+            text = message_content.get('conversation') or (message_content.get('extendedTextMessage') or {}).get('text', '')
+        else:
+            text = getattr(message_content, 'conversation', '') or getattr(getattr(message_content, 'extendedTextMessage', {}), 'text', '')
         
         if not text:
             return WebhookResponse(status="ignored", action="no_text")
@@ -192,14 +222,15 @@ async def evolution_webhook(
         return WebhookResponse(status="ignored", action=f"unsupported_type_{message_type}")
 
 
-async def process_voice_message(agent: EvoDataAgent, phone_number: str, audio_url: str):
+async def process_voice_message(agent: EvoDataAgent, phone_number: str, message_key: dict):
     """Procesa mensaje de voz en background"""
     try:
-        # Descargar audio
-        audio_path = await download_audio_async(audio_url)
+        # 1. Obtener audio decodificado desde EvolutionAPI (Base64)
+        logger.info(f"🔄 Solicitando audio decodificado para {message_key.get('id')}...")
+        base64_audio = agent.whatsapp_service.fetch_media(message_key)
         
-        if not audio_path:
-            error_msg = "❌ No pude descargar el audio. Intenta de nuevo."
+        if not base64_audio:
+            error_msg = "❌ No pude recuperar el audio desde EvolutionAPI. Verifica la configuración."
             agent.send_whatsapp_message(phone_number, {
                 "success": False,
                 "response_type": "error",
@@ -208,14 +239,26 @@ async def process_voice_message(agent: EvoDataAgent, phone_number: str, audio_ur
             })
             return
         
-        # Procesar con Whisper (Async)
+        # 2. Guardar base64 a archivo temporal (mp3 force)
+        import base64
+        temp_dir = Path(config.TEMP_DIR)
+        temp_dir.mkdir(exist_ok=True)
+        filename = f"voice_{uuid.uuid4().hex}.mp3" # Evolution fetchMedia with convertToMp3: True
+        audio_path = temp_dir / filename
+        
+        with open(audio_path, 'wb') as f:
+            f.write(base64.b64decode(base64_audio))
+            
+        logger.info(f"✅ Audio guardado: {audio_path}")
+        
+        # 3. Procesar con Whisper (Async)
         response = await agent.process_message(
             "",
             is_voice=True,
-            audio_path=audio_path
+            audio_path=str(audio_path)
         )
         
-        # Enviar respuesta
+        # 4. Enviar respuesta
         agent.send_whatsapp_message(phone_number, response)
         logger.info(f"✅ Mensaje de voz procesado y respondido")
     
@@ -252,10 +295,6 @@ async def download_audio_async(audio_url: str) -> Optional[str]:
         temp_dir = Path(config.TEMP_DIR)
         temp_dir.mkdir(exist_ok=True)
         
-        # Generar nombre único
-        filename = f"audio_{uuid.uuid4().hex}.ogg"
-        file_path = temp_dir / filename
-        
         # Descargar (TODO: usar httpx async en vez de requests)
         logger.info(f"⬇️ Descargando audio desde {audio_url}")
         response = requests.get(audio_url, timeout=30)
@@ -264,11 +303,27 @@ async def download_audio_async(audio_url: str) -> Optional[str]:
             logger.error(f"❌ Error al descargar audio: {response.status_code}")
             return None
         
+        # Determinar extensión real
+        content_type = response.headers.get('Content-Type', '')
+        ext = '.ogg' # Default
+        if 'audio/mpeg' in content_type or 'audio/mp3' in content_type:
+            ext = '.mp3'
+        elif 'audio/mp4' in content_type:
+            ext = '.m4a'
+        elif 'audio/wav' in content_type:
+            ext = '.wav'
+        elif 'audio/oga' in content_type or 'audio/ogg' in content_type:
+            ext = '.ogg'
+        
+        # Generar nombre único con la extensión correcta
+        filename = f"audio_{uuid.uuid4().hex}{ext}"
+        file_path = temp_dir / filename
+        
         # Guardar
         with open(file_path, 'wb') as f:
             f.write(response.content)
         
-        logger.info(f"✅ Audio descargado: {file_path}")
+        logger.info(f"✅ Audio descargado ({ext}): {file_path}")
         return str(file_path)
     
     except Exception as e:

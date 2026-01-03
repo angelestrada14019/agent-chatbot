@@ -144,6 +144,53 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"❌ Error al enviar adjunto: {str(e)}")
             return False
+            
+    async def fetch_media(self, message_key: Dict[str, Any]) -> Optional[str]:
+        """
+        Obtiene media (audio/video/doc) decodificado desde EvolutionAPI (Async)
+        
+        Args:
+            message_key: Objeto key del mensaje (remoteJid, fromMe, id)
+            
+        Returns:
+            str: Data en base64 del archivo o None si falla
+        """
+        import httpx
+        try:
+            # Endpoint correcto para v2: /chat/getBase64FromMediaMessage/{instance}
+            url = f"{self.base_url}/chat/getBase64FromMediaMessage/{self.instance}"
+            
+            payload = {
+                "key": message_key,
+                "convertToMp3": True # Forzar conversión a mp3
+            }
+            
+            logger.info(f"🔄 Solicitando Base64 a Evolution ({url})...")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url, 
+                    json=payload, 
+                    headers=self.headers, 
+                    timeout=60.0
+                )
+            
+            if response.status_code not in (200, 201):
+                logger.error(
+                    "❌ Error al obtener media",
+                    status_code=response.status_code,
+                    endpoint=url,
+                    response=response.text[:200]
+                )
+                return None
+            
+            result = response.json()
+            # EvolutionAPI devuelve { "base64": "..." }
+            return result.get("base64")
+        
+        except Exception as e:
+            logger.error(f"❌ Error al recuperar media: {str(e)}")
+            return None
     
     def send_message_with_response(
         self,

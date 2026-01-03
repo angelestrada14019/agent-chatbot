@@ -83,20 +83,42 @@ class MCPClient(Tool):
             self.logger.info(f"🌐 Iniciando transporte SSE a: {url}")
             
             stack = AsyncExitStack()
-            # Usar cliente SSE
-            read, write = await stack.enter_async_context(sse_client(url))
+            # Usar cliente SSE con timeout
+            try:
+                read, write = await asyncio.wait_for(
+                    stack.enter_async_context(sse_client(url)),
+                    timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.error(f"❌ Timeout conectando a {url}")
+                await stack.aclose()
+                raise ConnectionError(f"Timeout conectando a {url}")
             
             # Guardamos el stack para cleanup
             self._exit_stack.append(stack)
 
             # Crear sesión
             session = ClientSession(read, write)
-            await session.initialize()
+            
+            # Inicializar con timeout
+            try:
+                await asyncio.wait_for(session.initialize(), timeout=5.5)
+            except asyncio.TimeoutError:
+                self.logger.error(f"❌ Timeout inicializando sesión con {server_name}")
+                await session.close()
+                raise ConnectionError(f"Timeout inicializando sesión con {server_name}")
             
             self.sessions[server_name] = session
             
-            # Obtener capacidades
-            capabilities = await self._get_server_capabilities(server_name)
+            # Obtener capacidades con timeout
+            try:
+                capabilities = await asyncio.wait_for(
+                    self._get_server_capabilities(server_name),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(f"⚠️ Timeout obteniendo capacidades de {server_name}")
+                capabilities = {"resources": [], "tools": [], "prompts": []}
             
             self.logger.info(
                 f"✅ Conectado a '{server_name}'",
@@ -108,6 +130,9 @@ class MCPClient(Tool):
         
         except Exception as e:
             self.logger.error(f"❌ Error conectando a servidor '{server_name}': {str(e)}")
+            # Cleanup stack si falló a mitad de camino
+            if 'stack' in locals():
+                await stack.aclose()
             raise
     
     async def _get_server_capabilities(self, server_name: str) -> Dict[str, Any]:
@@ -153,12 +178,19 @@ class MCPClient(Tool):
         try:
             self.logger.info(f"🔧 Llamando herramienta '{tool_name}' en '{server_name}'")
             
-            result = await session.call_tool(tool_name, arguments=arguments)
+            # Tool call con timeout
+            result = await asyncio.wait_for(
+                session.call_tool(tool_name, arguments=arguments),
+                timeout=config.MAX_QUERY_TIMEOUT
+            )
             
             self.logger.info(f"✅ Herramienta '{tool_name}' ejecutada")
             
             return result
         
+        except asyncio.TimeoutError:
+            self.logger.error(f"❌ Timeout llamando herramienta '{tool_name}'")
+            raise Exception(f"La operación tardó demasiado (Timeout {config.MAX_QUERY_TIMEOUT}s)")
         except Exception as e:
             self.logger.error(f"❌ Error llamando herramienta '{tool_name}': {str(e)}")
             raise
@@ -207,6 +239,12 @@ class MCPClient(Tool):
         - list_capabilities: Listar capacidades
         """
         try:
+            # ADVERTENCIA: Esta interfaz síncrona es OBSOLETA y puede fallar en FastAPI
+            # Se mantiene por compatibilidad pero se desaconseja su uso
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError("No se puede usar execute() síncrono desde un event loop en ejecución. Usa las versiones asíncronas.")
+            
             if operation == "connect":
                 result = asyncio.run(self.connect_to_server(params["server_name"]))
                 return ToolResult(status=ToolStatus.SUCCESS, data=result)

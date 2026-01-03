@@ -2,3 +2,7 @@ _deprecated
 .env
 __pycache__
 *.log
+logs/webhook_debug.json
+/logs
+/exports
+/temp

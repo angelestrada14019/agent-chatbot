@@ -7,6 +7,7 @@ import logging.handlers
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Any
 from pythonjsonlogger import jsonlogger
 import config
 
@@ -122,13 +123,19 @@ class AgentLogger:
             success=success
         )
     
-    def log_error_with_context(self, error: Exception, context: dict):
+    def log_error_with_context(self, error: Exception, context: Dict[str, Any]):
         """Log error with additional context"""
+        # Create a copy to not modify original context
+        ctx = context.copy()
+        # Rename 'message' if it exists to avoid collision with self.error positioning
+        if 'message' in ctx:
+            ctx['original_message'] = ctx.pop('message')
+            
         self.error(
             f"❌ Error: {str(error)}",
             error_type=type(error).__name__,
             error_message=str(error),
-            **context
+            **ctx
         )
 
 

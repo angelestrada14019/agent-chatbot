@@ -29,9 +29,14 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 # ========================================
 # 🤖 EVOLUTION API CONFIGURATION
 # ========================================
-EVOLUTION_URL = os.getenv("EVOLUTION_URL", "http://82.25.93.102:8080/")
-EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "clientes")
-EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "123456.+az154721ww")
+EVOLUTION_URL = os.getenv("EVOLUTION_URL", "https://evoapi.tbrflows.transborder.com.co")
+EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "test")
+EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "9447C9B9D3FD-4F9B-A45C-0CF64D12EDC3")
+
+# ========================================
+# 🔗 MCP SERVER CONFIGURATION
+# ========================================
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8002/sse")
 
 # ========================================
 # 🎤 OPENAI WHISPER API CONFIGURATION
