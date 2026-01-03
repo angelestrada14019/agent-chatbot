@@ -49,6 +49,7 @@ class MCPClient(Tool):
         
         self.sessions: Dict[str, ClientSession] = {}
         self.server_configs: Dict[str, Dict] = {}
+        self._exit_stack = []  # Para almacenar los context managers (sse/stdio components)
         
         # Construir configuración desde variables de entorno
         self._build_server_configs_from_env()

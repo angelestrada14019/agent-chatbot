@@ -5,10 +5,13 @@ Enruta mensajes basado en la intención detectada usando Strategy Pattern
 from typing import Dict, Any, Optional, Protocol
 from abc import ABC, abstractmethod
 import pandas as pd
+from datetime import datetime
+import json
 
 from utils.logger import get_logger
 from utils.response_formatter import ResponseFormatter, MessageTemplates
-from tools.mcp_connector import get_connector
+# Usar el cliente MCP en lugar del conector directo para arquitectura desacoplada
+from tools.mcp_client import get_mcp_client
 from tools.visualizer import get_visualizer
 from tools.excel_generator import get_excel_generator
 from tools.calculator import get_calculator
@@ -29,11 +32,12 @@ class KeywordBasedIntentStrategy:
     """Estrategia de clasificación basada en keywords"""
     
     INTENT_KEYWORDS = {
-        "query": ["consulta", "muestra", "dame", "obtén", "cuánto", "cuántos", "lista", "ver"],
+        "query": ["consulta", "muestra", "dame", "obtén", "cuánto", "cuántos", "lista", "ver", "ventas", "productos", "clientes"],
         "visualization": ["gráfico", "gráfica", "chart", "visualiza", "plotea", "grafica"],
         "export": ["excel", "exporta", "descarga", "archivo", "reporte"],
-        "analysis": ["análisis", "analiza", "calcula", "promedio", "suma", "total", "estadística"],
-        "calculation": ["calcula", "suma", "promedio", "mediana", "correlación", "crecimiento"]
+        # Analysis combina todo: query + graficas + excel/analisis
+        "analysis": ["análisis", "analiza", "tendencia", "reporte de ventas", "trimestre", "balance"],
+        "calculation": ["calcula", "suma", "promedio", "mediana", "correlación", "crecimiento", "sqrt", "+", "-", "*", "/"]
     }
     
     def classify(self, message: str) -> str:
@@ -48,6 +52,10 @@ class KeywordBasedIntentStrategy:
         """
         message_lower = message.lower()
         
+        # Prioridad a Analysis si menciona reporte complejo
+        if "ventas" in message_lower and ("grafica" in message_lower or "excel" in message_lower or "tendencia" in message_lower):
+            return "analysis"
+        
         # Contar coincidencias por tipo de intención
         scores = {intent: 0 for intent in self.INTENT_KEYWORDS}
         
@@ -59,7 +67,7 @@ class KeywordBasedIntentStrategy:
         # Retornar la intención con mayor puntuación
         max_intent = max(scores, key=scores.get)
         
-        # Si no hay coincidencias, asumir consulta
+        # Si no hay coincidencias, asumir consulta genérica
         if scores[max_intent] == 0:
             return "query"
         
@@ -82,13 +90,14 @@ class IntentRouter:
             classification_strategy: Estrategia de clasificación (default: KeywordBased)
         """
         self.strategy = classification_strategy or KeywordBasedIntentStrategy()
-        self.db_connector = get_connector()
+        # Usar adapter que usa MCPClient por debajo
+        self.db_connector = get_mcp_client() 
         self.visualizer = get_visualizer()
         self.excel_generator = get_excel_generator()
         self.calculator = get_calculator()
         self.response_formatter = ResponseFormatter()
         
-        logger.info("✅ IntentRouter inicializado")
+        logger.info("✅ IntentRouter inicializado (Conectado vía MCP)")
     
     def route_message(self, message: str, request_id: str) -> Dict[str, Any]:
         """
@@ -126,60 +135,148 @@ class IntentRouter:
             )
     
     def _handle_query(self, message: str, request_id: str) -> Dict[str, Any]:
-        """Handler para consultas de datos"""
+        """Handler para consultas de datos simples"""
         logger.info("📊 Procesando consulta de datos...")
         
-        # TODO: Implementar NLP->SQL conversion
+        # Mapeo simple NLP -> SQL (para demo)
+        if "ventas" in message.lower():
+            sql = "SELECT * FROM ventas ORDER BY fecha DESC LIMIT 10"
+            result = self.db_connector.execute_query(sql)
+            
+            if result["success"]:
+                # Formatear tabla simple
+                df = pd.DataFrame(result["data"])
+                table_str = df.to_markdown(index=False)
+                return {
+                    "success": True,
+                    "response": f"Aquí están las últimas ventas:\n\n{table_str}",
+                    "response_type": "text",
+                    "request_id": request_id
+                }
+        
+        elif "productos" in message.lower():
+            sql = "SELECT * FROM productos LIMIT 10"
+            result = self.db_connector.execute_query(sql)
+             
+            if result["success"]:
+                 df = pd.DataFrame(result["data"])
+                 table_str = df.to_markdown(index=False)
+                 return {
+                    "success": True,
+                    "response": f"Catálogo de productos:\n\n{table_str}",
+                    "response_type": "text",
+                    "request_id": request_id
+                }
+                 
         return self.response_formatter.format_error_response(
-            error_message="Funcionalidad de consulta SQL desde lenguaje natural pendiente. Use ejemplos directos con tools.",
-            error_type="not_implemented",
-            details={"message": message},
+            error_message="No entendí qué datos quieres. Prueba 'muéstrame las ventas' o 'lista productos'.",
+            error_type="not_understanding",
             request_id=request_id
         )
     
     def _handle_visualization(self, message: str, request_id: str) -> Dict[str, Any]:
         """Handler para visualizaciones"""
-        logger.info("📈 Procesando solicitud de visualización...")
-        
-        # TODO: Obtener datos relevantes
-        return self.response_formatter.format_error_response(
-            error_message="Use examples/example_queries.py para crear visualizaciones. Conversión automática pendiente.",
-            error_type="not_implemented",
-            request_id=request_id
-        )
+        return self._handle_analysis(message, request_id)  # Reutilizar lógica de análisis
     
     def _handle_export(self, message: str, request_id: str) -> Dict[str, Any]:
         """Handler para exportación Excel"""
-        logger.info("📁 Procesando exportación a Excel...")
-        
-        # TODO: Obtener datos relevantes
-        return self.response_formatter.format_error_response(
-            error_message="Use examples/example_queries.py para exportar a Excel. Conversión automática pendiente.",
-            error_type="not_implemented",
-            request_id=request_id
-        )
+        return self._handle_analysis(message, request_id)
     
     def _handle_calculation(self, message: str, request_id: str) -> Dict[str, Any]:
         """Handler para cálculos"""
         logger.info("🧮 Procesando solicitud de cálculo...")
         
-        # TODO: Extraer operación y parámetros del mensaje
-        return self.response_formatter.format_error_response(
-            error_message="Use Calculator tool directamente. Ejemplo en examples/. Conversión NLP pendiente.",
-            error_type="not_implemented",
-            request_id=request_id
-        )
+        try:
+            result = self.calculator.calculate(message)
+            return {
+                "success": True,
+                "response": f"El resultado es: {result}",
+                "response_type": "text",
+                "request_id": request_id
+            }
+        except Exception as e:
+            return self.response_formatter.format_error_response(
+                error_message=f"No pude calcular eso: {str(e)}",
+                error_type="calculation_error",
+                request_id=request_id
+            )
     
     def _handle_analysis(self, message: str, request_id: str) -> Dict[str, Any]:
-        """Handler para análisis estadístico"""
-        logger.info("📊 Procesando análisis estadístico...")
+        """
+        Handler completo para análisis (Query -> Chart -> Excel)
+        Workflow solicitado por usuario: "ventas trimestre + grafica tendencia + excel"
+        """
+        logger.info("📊 Procesando flujo completo de análisis (MCP -> Viz -> Excel)...")
         
-        # TODO: Combinar DB query + Calculator
-        return self.response_formatter.format_error_response(
-            error_message="Use MCP Connector + Calculator directamente. Ver examples/. NLP pendiente.",
-            error_type="not_implemented",
-            request_id=request_id
+        # 1. Obtención de Datos (Vía MCP)
+        # -----------------------------
+        sql = "SELECT fecha, producto, cantidad, precio, (cantidad * precio) as total FROM ventas WHERE fecha >= '2024-01-01' ORDER BY fecha ASC"
+        
+        db_result = self.db_connector.execute_query(sql)
+        
+        if not db_result["success"]:
+            return self.response_formatter.format_error_response(
+                error_message=f"Error consultando datos: {db_result.get('error')}",
+                error_type="db_error",
+                request_id=request_id
+            )
+            
+        data = db_result["data"]
+        df = pd.DataFrame(data)
+        
+        if df.empty:
+            return {
+                "success": True,
+                "response": "No encontré ventas en este periodo.",
+                "response_type": "text",
+                "request_id": request_id
+            }
+            
+        # 2. Generación de Gráficos (Visualizer)
+        # ------------------------------------
+        files = []
+        
+        # Gráfico de Tendencia (Línea de tiempo)
+        chart_result = self.visualizer.create_line_chart(
+            data=df,
+            x_column="fecha",
+            y_columns=["total"],
+            title="Tendencia de Ventas (Trimestre Actual)"
         )
+        
+        if chart_result["success"]:
+            files.append(chart_result["file_path"])
+            
+        # 3. Generación de Excel (ExcelGenerator)
+        # -------------------------------------
+        excel_result = self.excel_generator.create_excel_from_data(
+            data=df,
+            filename=f"reporte_ventas_{datetime.now().strftime('%Y%m%d')}",
+            sheet_name="Ventas Trimestre"
+        )
+        
+        if excel_result["success"]:
+            # Insertar el gráfico en el Excel también
+            if chart_result["success"]:
+                self.excel_generator.add_chart_to_excel(
+                    file_path=excel_result["file_path"],
+                    sheet_name="Ventas Trimestre",
+                    chart_type="line",
+                    data_range=f"E2:E{len(df)+1}",
+                    chart_title="Tendencia Ventas",
+                    position="G2"
+                )
+            files.append(excel_result["file_path"])
+            
+        # 4. Respuesta Final
+        # ----------------
+        return {
+            "success": True,
+            "response": "✅ Aquí tienes el análisis solicitado:\n\n1. 📊 Gráfico de tendencia de ventas\n2. 📁 Reporte Excel detallado",
+            "response_type": "files",
+            "files": files,
+            "request_id": request_id
+        }
     
     def set_classification_strategy(self, strategy: IntentStrategy):
         """

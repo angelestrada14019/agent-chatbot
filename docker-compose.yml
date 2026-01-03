@@ -22,7 +22,7 @@ services:
     networks:
       - evodata-network
 
-  # MCP Server (Servidor MCP que expone PostgreSQL)
+  # MCP Server (SSE Service)
   mcp-server:
     build:
       context: ./mcp-server
@@ -34,6 +34,9 @@ services:
       DB_NAME: analytics
       DB_USER: postgres
       DB_PASSWORD: postgres
+      # No requiere comando especial, el Dockerfile debe ejecutar server.py
+    ports:
+      - "8002:8002"  # Exponer puerto para SSE
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +45,7 @@ services:
     networks:
       - evodata-network
     restart: unless-stopped
+    command: ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8002"]
 
   # Webhook Server (FastAPI)
   webhook-server:
@@ -59,13 +63,14 @@ services:
       - EVOLUTION_URL=${EVOLUTION_URL}
       - EVOLUTION_INSTANCE=${EVOLUTION_INSTANCE}
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
+      - MCP_SERVER_URL=http://mcp-server:8002/sse  # Conexión al servidor MCP
       - WEBHOOK_SERVER_PORT=5000
       - FILE_SERVER_PORT=8000
     ports:
       - "5000:5000"
     depends_on:
       - postgres
-      - mcp-server
+      # - mcp-server  # Comentado porque mcp-server ya no corre como servicio
     volumes:
       - ./logs:/app/logs
       - ./exports:/app/exports
