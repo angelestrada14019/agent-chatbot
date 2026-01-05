@@ -78,15 +78,8 @@ MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "25"))  # WhatsApp limit
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "10"))
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # seconds
 
-# NOTE: Las siguientes constantes est\u00e1n disponibles para uso futuro
-# pero actualmente no se usan en el c\u00f3digo
+# NOTE: Estas constantes son marcadores para el futuro
 
-# Allowed SQL keywords (whitelist approach for safety)
-# ALLOWED_SQL_KEYWORDS = [
-#     "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
-#     "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET", "AS", "ON",
-#     "AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "IS", "NULL"
-# ]
 
 # Forbidden SQL keywords (blacklist for destructive operations)
 FORBIDDEN_SQL_KEYWORDS = [
@@ -123,8 +116,6 @@ AGENT_VERSION = "1.0.0"
 DEFAULT_LANGUAGE = "es"  # Spanish
 RESPONSE_TIMEOUT = int(os.getenv("RESPONSE_TIMEOUT", "60"))  # seconds
 
-# Intent classification confidence threshold
-INTENT_CONFIDENCE_THRESHOLD = float(os.getenv("INTENT_CONFIDENCE_THRESHOLD", "0.6"))
 
 # ========================================
 # 📊 EXCEL EXPORT DEFAULTS

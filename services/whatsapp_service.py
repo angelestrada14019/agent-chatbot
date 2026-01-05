@@ -1,253 +1,123 @@
 """
-💬 WhatsApp Service
-Gestiona toda la comunicación con WhatsApp vía EvolutionAPI
+📞 WhatsApp Service - EvolutionAPI Integration
+Maneja el envío de mensajes y archivos a través de EvolutionAPI de forma asíncrona.
 """
-from typing import Dict, Any, Optional
-import requests
+import base64
 import mimetypes
+import httpx
+from typing import Dict, Any, Optional, List
+from pathlib import Path
 
 import config
 from utils.logger import get_logger
 
 logger = get_logger("WhatsAppService")
 
-
 class WhatsAppService:
-    """
-    Servicio especializado en comunicación WhatsApp
-    
-    Responsabilidades:
-    - Envío de mensajes de texto
-    - Envío de archivos adjuntos
-    - Normalización de números de teléfono
-    """
+    """Servicio asíncrono para interactuar con EvolutionAPI"""
     
     def __init__(self):
-        """Inicializa el servicio de WhatsApp"""
         self.base_url = config.EVOLUTION_URL
         self.instance = config.EVOLUTION_INSTANCE
         self.api_key = config.EVOLUTION_API_KEY
-        
         self.headers = {
-            "Content-Type": "application/json",
-            "apikey": self.api_key
+            "apikey": self.api_key,
+            "Content-Type": "application/json"
         }
-        
-        logger.info("✅ WhatsAppService inicializado")
+        # Client reusable para eficiencia (SOLID: Performance)
+        self.client = httpx.AsyncClient(headers=self.headers, timeout=60.0)
     
-    def send_text_message(self, phone_number: str, text: str) -> bool:
-        """
-        Envía mensaje de texto por WhatsApp
-        
-        Args:
-            phone_number: Número de destino (formato: 573124488445@c.us)
-            text: Texto del mensaje
-            
-        Returns:
-            bool: True si se envió correctamente
-        """
+    async def send_text_message(self, phone_number: str, message: str) -> bool:
+        """Envía mensaje de texto simple de forma asíncrona"""
         try:
             url = f"{self.base_url}/message/sendText/{self.instance}"
-            
             payload = {
                 "number": phone_number,
-                "options": {"delay": 1000, "presence": "composing"},
-                "text": text
-            }
-            
-            response = requests.post(url, json=payload, headers=self.headers, timeout=30)
-            
-            if response.status_code not in (200, 201):
-                logger.error(
-                    "❌ Error al enviar mensaje",
-                    status_code=response.status_code,
-                    response=response.text
-                )
-                return False
-            
-            logger.info(f"✅ Mensaje enviado a {phone_number}")
-            return True
-        
-        except requests.exceptions.Timeout:
-            logger.error("⏱️ Timeout al enviar mensaje")
-            return False
-        except Exception as e:
-            logger.error(f"❌ Error al enviar WhatsApp: {str(e)}")
-            return False
-    
-    def send_attachment(
-        self,
-        phone_number: str,
-        file_data: str,
-        filename: str,
-        caption: str = "",
-        file_type: str = "document"
-    ) -> bool:
-        """
-        Envía archivo adjunto por WhatsApp
-        
-        Args:
-            phone_number: Número de destino
-            file_data: Datos del archivo en base64
-            filename: Nombre del archivo
-            caption: Texto que acompaña el archivo
-            file_type: Tipo ('image' o 'document')
-            
-        Returns:
-            bool: True si se envió correctamente
-        """
-        try:
-            # Determinar mimetype
-            mimetype, _ = mimetypes.guess_type(filename)
-            if not mimetype:
-                # Defaults según tipo
-                if file_type == "image":
-                    mimetype = "image/png"
-                elif filename.endswith('.xlsx'):
-                    mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                elif filename.endswith('.pdf'):
-                    mimetype = "application/pdf"
-                else:
-                    mimetype = "application/octet-stream"
-            
-            # Determinar mediatype para WhatsApp
-            mediatype = "image" if file_type == "image" else "document"
-            
-            # Endpoint correcto
-            url = f"{self.base_url}/message/sendMedia/{self.instance}"
-            
-            # Payload correcto
-            payload = {
-                "number": phone_number,
-                "mediatype": mediatype,
-                "mimetype": mimetype,
-                "media": file_data,  # Key 'media' no 'base64'
-                "fileName": filename,
-                "caption": caption,
+                "text": message,
                 "delay": 1000,
                 "linkPreview": False
             }
             
-            response = requests.post(url, json=payload, headers=self.headers, timeout=60)
-            
-            if response.status_code not in (200, 201):
-                logger.error(
-                    "❌ Error al enviar adjunto",
-                    status_code=response.status_code,
-                    response=response.text[:200]
-                )
-                return False
-            
-            logger.info(f"✅ Adjunto enviado: {filename}")
-            return True
-        
+            res = await self.client.post(url, json=payload)
+            return res.status_code in (200, 201)
         except Exception as e:
-            logger.error(f"❌ Error al enviar adjunto: {str(e)}")
+            logger.error(f"❌ Error enviando texto: {str(e)}")
             return False
-            
-    async def fetch_media(self, message_key: Dict[str, Any]) -> Optional[str]:
-        """
-        Obtiene media (audio/video/doc) decodificado desde EvolutionAPI (Async)
-        
-        Args:
-            message_key: Objeto key del mensaje (remoteJid, fromMe, id)
-            
-        Returns:
-            str: Data en base64 del archivo o None si falla
-        """
-        import httpx
+
+    async def send_attachment(self, phone_number: str, file_path: str, caption: str = "") -> bool:
+        """Lee un archivo local y lo envía de forma asíncrona"""
         try:
-            # Endpoint correcto para v2: /chat/getBase64FromMediaMessage/{instance}
-            url = f"{self.base_url}/chat/getBase64FromMediaMessage/{self.instance}"
+            path = Path(file_path)
+            if not path.exists():
+                logger.error(f"❌ Archivo no encontrado: {file_path}")
+                return False
+                
+            # Leer archivo de forma bloqueante (pequeños archivos de exportación)
+            # Para archivos grandes se podría usar aiofiles, pero para charts/excel < 1MB está bien.
+            with open(path, "rb") as f:
+                data_b64 = base64.b64encode(f.read()).decode('utf-8')
             
+            filename = path.name
+            mimetype, _ = mimetypes.guess_type(file_path)
+            mimetype = mimetype or "application/octet-stream"
+            mediatype = "image" if mimetype.startswith("image/") else "document"
+            
+            url = f"{self.base_url}/message/sendMedia/{self.instance}"
             payload = {
-                "key": message_key,
-                "convertToMp3": True # Forzar conversión a mp3
+                "number": phone_number,
+                "mediatype": mediatype,
+                "mimetype": mimetype,
+                "media": data_b64,
+                "fileName": filename,
+                "caption": caption
             }
             
-            logger.info(f"🔄 Solicitando Base64 a Evolution ({url})...")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url, 
-                    json=payload, 
-                    headers=self.headers, 
-                    timeout=60.0
-                )
-            
-            if response.status_code not in (200, 201):
-                logger.error(
-                    "❌ Error al obtener media",
-                    status_code=response.status_code,
-                    endpoint=url,
-                    response=response.text[:200]
-                )
-                return None
-            
-            result = response.json()
-            # EvolutionAPI devuelve { "base64": "..." }
-            return result.get("base64")
-        
+            res = await self.client.post(url, json=payload)
+            return res.status_code in (200, 201)
         except Exception as e:
-            logger.error(f"❌ Error al recuperar media: {str(e)}")
-            return None
-    
-    def send_message_with_response(
-        self,
-        phone_number: str,
-        response_data: Dict[str, Any]
-    ) -> bool:
+            logger.error(f"❌ Error enviando adjunto {file_path}: {str(e)}")
+            return False
+
+    async def send_message_with_response(self, phone_number: str, response_data: Dict[str, Any]) -> bool:
         """
-        Envía respuesta completa (texto + adjuntos si los hay)
-        
-        Args:
-            phone_number: Número de destino
-            response_data: Dict con response_type, content, attachments
-            
-        Returns:
-            bool: True si se envió correctamente
+        Envía la respuesta del agente (texto + archivos) de forma asíncrona.
         """
         try:
-            # Enviar mensaje de texto
-            text_sent = self.send_text_message(phone_number, response_data["content"])
+            # 1. Enviar texto principal
+            text = response_data.get("response", "")
+            if text:
+                await self.send_text_message(phone_number, text)
             
-            if not text_sent:
-                return False
-            
-            # Enviar adjuntos si los hay
-            if response_data.get("attachments"):
-                for attachment in response_data["attachments"]:
-                    self.send_attachment(
-                        phone_number=phone_number,
-                        file_data=attachment["data"],
-                        filename=attachment["filename"],
-                        caption=attachment.get("caption", ""),
-                        file_type=attachment.get("type", "document")
-                    )
-            
+            # 2. Enviar archivos (si hay)
+            files = response_data.get("files", [])
+            for file_path in files:
+                await self.send_attachment(phone_number, file_path)
+                
             return True
-        
         except Exception as e:
-            logger.error(f"❌ Error al enviar respuesta completa: {str(e)}")
+            logger.error(f"❌ Error en send_message_with_response: {str(e)}")
             return False
-    
-    @staticmethod
-    def normalize_phone_number(number: str) -> str:
-        """
-        Normaliza número de teléfono al formato de EvolutionAPI
-        
-        Args:
-            number: Número en cualquier formato
+
+    def normalize_phone_number(self, number: str) -> str:
+        """Asegura formato @c.us"""
+        if "@" not in number:
+            return f"{number}@c.us"
+        return number.replace("@s.whatsapp.net", "@c.us")
+
+    async def fetch_media(self, message_key: Dict[str, Any]) -> Optional[str]:
+        """Obtiene base64 de un mensaje de media de Evolution"""
+        try:
+            url = f"{self.base_url}/chat/getBase64FromMediaMessage/{self.instance}"
+            payload = {"key": message_key, "convertToMp3": True}
             
-        Returns:
-            str: Número normalizado (formato @c.us)
-        """
-        # Si viene con @s.whatsapp.net, convertir a @c.us
-        if '@s.whatsapp.net' in number:
-            number = number.replace('@s.whatsapp.net', '@c.us')
-        
-        # Si no tiene @, agregarlo
-        if '@' not in number:
-            number = f"{number}@c.us"
-        
-        return number
+            res = await self.client.post(url, json=payload)
+            if res.status_code in (200, 201):
+                return res.json().get("base64")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error en fetch_media: {str(e)}")
+            return None
+    
+    async def close(self):
+        """Cierra el cliente HTTP"""
+        await self.client.aclose()
