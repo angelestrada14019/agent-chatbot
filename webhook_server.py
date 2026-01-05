@@ -56,15 +56,32 @@ whatsapp = WhatsAppService()
 
 @app.post("/webhook/evolution")
 async def handle_webhook(
-    payload: EvolutionPayload, 
+    request: Request,
     background_tasks: BackgroundTasks
 ):
-    """Procesador principal de Webhooks"""
-    data = payload.data or payload.model_dump()
+    """Procesador principal de Webhooks (Máxima Flexibilidad)"""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"status": "invalid_json"}
+
+    # Extraer data de diferentes versiones/eventos
+    data = body.get("data") or body
+    instance = body.get("instance") or config.EVOLUTION_INSTANCE
+    event = body.get("event")
+    
+    # Soporte para array de mensajes (v2 standard)
+    if isinstance(data, dict) and "messages" in data:
+        messages = data.get("messages", [])
+        if messages: data = messages[0]
+
+    # Solo procesar mensajes (evitar ruidos de conexión/presencia)
+    if event and "messages" not in event and "MESSAGES" not in event:
+        return {"status": "ignored_event", "event": event}
+
     key = data.get("key", {})
     from_me = key.get("fromMe", False)
-    
-    if from_me: return {"status": "ignored"}
+    if from_me: return {"status": "ignored_self"}
 
     remote_jid = key.get("remoteJid")
     if not remote_jid: return {"status": "no_jid"}
@@ -72,7 +89,7 @@ async def handle_webhook(
     phone_number = whatsapp.normalize_phone_number(remote_jid)
     msg_type = data.get("messageType")
     
-    logger.info(f"📩 Webhook recibido: {msg_type} desde {phone_number}")
+    logger.info(f"📩 Evento: {event or 'legacy'} | Instancia: {instance} | Tipo: {msg_type} | De: {phone_number}")
 
     # Orquestación de tareas en segundo plano
     if msg_type in ["conversation", "extendedTextMessage"]:
@@ -83,17 +100,30 @@ async def handle_webhook(
             return {"status": "processing"}
             
     elif msg_type in ["audioMessage", "audio"]:
-        # Intentar extraer URL del audio (Evolution v2)
         message = data.get("message", {})
         audio_msg = message.get("audioMessage") or message.get("audio") or {}
         audio_url = audio_msg.get("url")
         
-        background_tasks.add_task(process_chat_flow, phone_number, "", is_voice=True, msg_key=key, audio_url=audio_url)
+        # SI es una URL de WhatsApp CDN (.enc), forzar fetch_media para descifrar
+        force_fetch = False
+        if audio_url and ("mmg.whatsapp.net" in audio_url or ".enc" in audio_url):
+            logger.info("🔐 URL encriptada detectada, usando proxy de Evolution para descifrar")
+            force_fetch = True
+            
+        background_tasks.add_task(
+            process_chat_flow, 
+            phone_number, 
+            "", 
+            is_voice=True, 
+            msg_key=key, 
+            audio_url=audio_url if not force_fetch else None,
+            instance_name=instance
+        )
         return {"status": "processing"}
 
     return {"status": "unsupported_type"}
 
-async def process_chat_flow(phone_number: str, text: str, is_voice: bool = False, msg_key: dict = None, audio_url: str = None):
+async def process_chat_flow(phone_number: str, text: str, is_voice: bool = False, msg_key: dict = None, audio_url: str = None, instance_name: str = None):
     """Flujo completo: Procesamiento -> Agente -> WhatsApp"""
     try:
         audio_path = None
@@ -114,7 +144,7 @@ async def process_chat_flow(phone_number: str, text: str, is_voice: bool = False
             # 2. Si falló o no había URL, intentar base64 estándar
             if not success and msg_key:
                 logger.info(f"🎤 Solicitando media base64 para {phone_number}...")
-                base64_audio = await whatsapp.fetch_media(msg_key)
+                base64_audio = await whatsapp.fetch_media(msg_key, instance_name=instance_name)
                 if base64_audio:
                     import base64
                     with open(audio_path, "wb") as f:
