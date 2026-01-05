@@ -1,23 +1,20 @@
-import requests
-import os
-import json
-from dotenv import load_dotenv
+import sys
+from pathlib import Path
 
-load_dotenv()
+# Add project root to sys.path to allow importing config
+sys.path.append(str(Path(__file__).parent.parent))
 
-URL = os.getenv("EVOLUTION_URL", "https://evoapi.tbrflows.transborder.com.co")
-INSTANCE = os.getenv("EVOLUTION_INSTANCE", "test")
-API_KEY = os.getenv("EVOLUTION_API_KEY")
+import config
 
 headers = {
-    "apikey": API_KEY,
+    "apikey": config.EVOLUTION_API_KEY,
     "Content-Type": "application/json"
 }
 
 def check_instance():
-    print(f"\n--- Checking Instance Connection: {INSTANCE} ---")
+    print(f"\n--- Checking Instance Connection: {config.EVOLUTION_INSTANCE} ---")
     try:
-        res = requests.get(f"{URL}/instance/connectionState/{INSTANCE}", headers=headers)
+        res = requests.get(f"{config.EVOLUTION_URL}/instance/connectionState/{config.EVOLUTION_INSTANCE}", headers=headers)
         print(f"Status: {res.status_code}")
         print(f"Data: {json.dumps(res.json(), indent=2)}")
     except Exception as e:
@@ -26,7 +23,7 @@ def check_instance():
 def check_webhook():
     print(f"\n--- Checking Webhook Config (Instance) ---")
     try:
-        res = requests.get(f"{URL}/webhook/find/{INSTANCE}", headers=headers)
+        res = requests.get(f"{config.EVOLUTION_URL}/webhook/find/{config.EVOLUTION_INSTANCE}", headers=headers)
         print(f"Status: {res.status_code}")
         if res.status_code == 200:
             print(json.dumps(res.json(), indent=2))
@@ -36,10 +33,10 @@ def check_webhook():
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    if not API_KEY:
+    if not config.EVOLUTION_API_KEY:
         print("[ERROR] EVOLUTION_API_KEY no encontrado en .env")
     else:
-        print(f"URL: {URL}")
-        print(f"Instance: {INSTANCE}")
+        print(f"URL: {config.EVOLUTION_URL}")
+        print(f"Instance: {config.EVOLUTION_INSTANCE}")
         check_instance()
         check_webhook()

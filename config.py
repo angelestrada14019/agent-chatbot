@@ -66,9 +66,7 @@ TEMP_DIR = os.path.join(BASE_DIR, "temp")
 EXPORTS_DIR = os.path.join(BASE_DIR, "exports")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
-# Create directories if they don't exist
-for directory in [TEMP_DIR, EXPORTS_DIR, LOGS_DIR]:
-    os.makedirs(directory, exist_ok=True)
+# NOTE: Los directorios se inicializan en el startup del servidor para evitar efectos secundarios en config.
 
 # ========================================
 # 🔐 SECURITY SETTINGS

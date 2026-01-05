@@ -14,11 +14,18 @@ from pydantic import BaseModel
 
 import config
 from evodata_agent import EvoDataAgent
+from services.whatsapp_service import WhatsAppService
 from utils.logger import get_logger
 
-logger = get_logger("WebhookServer")
-
 app = FastAPI(title=f"{config.AGENT_NAME} API", version=config.AGENT_VERSION)
+
+@app.on_event("startup")
+async def startup_event():
+    """Inicialización al arrancar el servidor"""
+    import os
+    for directory in [config.TEMP_DIR, config.EXPORTS_DIR, config.LOGS_DIR]:
+        os.makedirs(directory, exist_ok=True)
+    logger.info("📁 Directorios de sistema inicializados")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,82 +42,74 @@ class EvolutionPayload(BaseModel):
     message: Optional[Dict[str, Any]] = None
     messageType: Optional[str] = None
 
-def get_agent() -> EvoDataAgent:
-    """Singleton del agente para FastAPI"""
-    if not hasattr(app, "agent"):
-        app.agent = EvoDataAgent()
-    return app.agent
+# Singletons
+agent = EvoDataAgent()
+whatsapp = WhatsAppService()
 
 @app.post("/webhook/evolution")
 async def handle_webhook(
     payload: EvolutionPayload, 
-    background_tasks: BackgroundTasks,
-    agent: EvoDataAgent = Depends(get_agent)
+    background_tasks: BackgroundTasks
 ):
     """Procesador principal de Webhooks"""
     data = payload.data or payload.model_dump()
     key = data.get("key", {})
-    msg_type = data.get("messageType")
     from_me = key.get("fromMe", False)
-
-    if from_me:
-        return {"status": "ignored", "reason": "fromMe"}
+    
+    if from_me: return {"status": "ignored"}
 
     remote_jid = key.get("remoteJid")
-    if not remote_jid:
-        return {"status": "ignored", "reason": "no_jid"}
-
-    phone_number = remote_jid.replace("@s.whatsapp.net", "@c.us")
+    if not remote_jid: return {"status": "no_jid"}
     
-    # Extraer texto o audio
+    phone_number = whatsapp.normalize_phone_number(remote_jid)
+    msg_type = data.get("messageType")
+
+    # Orquestación de tareas en segundo plano
     if msg_type in ["conversation", "extendedTextMessage"]:
         msg_content = data.get("message", {})
         text = msg_content.get("conversation") or (msg_content.get("extendedTextMessage") or {}).get("text", "")
         if text:
-            background_tasks.add_task(process_text, agent, phone_number, text)
-            return {"status": "processing", "type": "text"}
+            background_tasks.add_task(process_chat_flow, phone_number, text)
+            return {"status": "processing"}
             
     elif msg_type == "audioMessage":
-        # Se asume que el audio requiere descarga o fetch previo
-        background_tasks.add_task(process_audio, agent, phone_number, key)
-        return {"status": "processing", "type": "audio"}
+        background_tasks.add_task(process_chat_flow, phone_number, "", is_voice=True, msg_key=key)
+        return {"status": "processing"}
 
-    return {"status": "ignored", "type": msg_type}
+    return {"status": "unsupported_type"}
 
-async def process_text(agent: EvoDataAgent, phone_number: str, text: str):
+async def process_chat_flow(phone_number: str, text: str, is_voice: bool = False, msg_key: dict = None):
+    """Flujo completo: Procesamiento -> Agente -> WhatsApp"""
     try:
-        response = await agent.process_message(text, phone_number=phone_number)
-        await agent.send_whatsapp_message(phone_number, response)
-    except Exception as e:
-        logger.log_error_with_context(e, {"phone_number": phone_number, "action": "process_text", "text": text[:50]})
+        audio_path = None
+        if is_voice and msg_key:
+            # 1. Obtener audio de Evolution
+            base64_audio = await whatsapp.fetch_media(msg_key)
+            if base64_audio:
+                audio_path = Path(config.TEMP_DIR) / f"voice_{uuid.uuid4().hex}.mp3"
+                import base64
+                with open(audio_path, "wb") as f:
+                    f.write(base64.b64decode(base64_audio))
 
-async def process_audio(agent: EvoDataAgent, phone_number: str, key: dict):
-    try:
-        # Fetch base64 from Evolution
-        base64_audio = await agent.whatsapp_service.fetch_media(key)
-        if not base64_audio:
-            return
-            
-        # Guardar temporal
-        temp_path = Path(config.TEMP_DIR) / f"voice_{uuid.uuid4().hex}.mp3"
-        import base64
-        with open(temp_path, "wb") as f:
-            f.write(base64.b64decode(base64_audio))
-            
-        response = await agent.process_message("", phone_number=phone_number, is_voice=True, audio_path=str(temp_path))
-        await agent.send_whatsapp_message(phone_number, response)
+        # 2. El Agente procesa (incluye Whisper si hay audio_path)
+        logger.info(f"🤖 Procesando solicitud de {phone_number}")
+        result = await agent.process_message(text, phone_number=phone_number, is_voice=is_voice, audio_path=str(audio_path) if audio_path else None)
+        
+        # 3. Entrega de resultados
+        if result.get("success"):
+            await whatsapp.send_message_with_response(phone_number, result)
         
         # Cleanup
-        if temp_path.exists(): temp_path.unlink()
+        if audio_path and audio_path.exists(): audio_path.unlink()
+        
     except Exception as e:
-        logger.log_error_with_context(e, {"phone_number": phone_number, "action": "process_audio"})
+        logger.log_error_with_context(e, {"phone_number": phone_number})
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Limpieza de recursos al apagar el servidor"""
-    agent = get_agent()
-    await agent.whatsapp_service.close()
-    logger.info("🔌 Conexiones cerradas correctamente")
+    """Limpieza de recursos"""
+    await whatsapp.close()
+    logger.info("🔌 Conexiones cerradas")
 
 @app.get("/health")
 def health():

@@ -1,14 +1,15 @@
 """
 📊 Visualizer Tool - Integración con OpenAI Agents SDK
-Generador de visualizaciones profesionales usando matplotlib y plotly.
+Generador de visualizaciones profesionales usando matplotlib y seaborn.
+Retorna resultados estructurados con Pydantic.
 """
 import pandas as pd
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
+from pydantic import BaseModel, Field
 
 import matplotlib
 matplotlib.use('Agg')
@@ -23,11 +24,18 @@ logger = logging.getLogger("VisualizerTool")
 # Configuración de estilo
 plt.style.use('seaborn-v0_8-darkgrid')
 
+class ChartResult(BaseModel):
+    """Resultado estructurado de la generación de un gráfico"""
+    success: bool = Field(..., description="Indica si el gráfico se generó con éxito")
+    message: str = Field(..., description="Mensaje descriptivo del resultado")
+    file_path: Optional[str] = Field(None, description="Ruta local al archivo de imagen generado")
+    chart_type: str = Field(..., description="Tipo de gráfico generado")
+
 class VisualizerManager:
     """Gestiona la generación de archivos de imagen"""
     def __init__(self):
         self.output_dir = Path(config.EXPORTS_DIR)
-        self.output_dir.mkdir(exist_ok=True)
+        # Directorio asegurado en el startup del servidor
 
     def save_fig(self, fig, prefix: str) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -47,7 +55,7 @@ def generate_chart(
     chart_type: str = "bar", 
     x_axis: Optional[str] = None, 
     y_axis: Optional[str] = None
-) -> str:
+) -> ChartResult:
     """
     Genera un gráfico profesional a partir de datos en formato JSON.
     
@@ -55,15 +63,15 @@ def generate_chart(
         data_json: Lista de objetos JSON con los datos.
         title: Título descriptivo del gráfico.
         chart_type: Tipo de gráfico ('bar', 'line', 'pie', 'scatter').
-        x_axis: Nombre de la columna para el eje X (opcional, se usará la primera si no se provee).
-        y_axis: Nombre de la columna para el eje Y (opcional, se usará la segunda si no se provee).
+        x_axis: Nombre de la columna para el eje X.
+        y_axis: Nombre de la columna para el eje Y.
     """
     try:
         data = json.loads(data_json)
         df = pd.DataFrame(data)
         
         if df.empty:
-            return "No hay datos para graficar."
+            return ChartResult(success=False, message="No hay datos para graficar.", chart_type=chart_type)
 
         # Auto-selección de ejes si no se proveen
         if not x_axis: x_axis = df.columns[0]
@@ -87,15 +95,13 @@ def generate_chart(
         
         path = viz_manager.save_fig(fig, f"chart_{chart_type}")
         
-        return json.dumps({
-            "success": True,
-            "message": f"Gráfica '{title}' generada correctamente.",
-            "file_path": path
-        })
+        return ChartResult(
+            success=True,
+            message=f"Gráfica '{title}' generada correctamente.",
+            file_path=path,
+            chart_type=chart_type
+        )
 
     except Exception as e:
         logger.error(f"❌ Error generando gráfica: {str(e)}")
-        return json.dumps({"success": False, "error": str(e)})
-
-def get_visualizer():
-    return viz_manager
+        return ChartResult(success=False, message=f"Error: {str(e)}", chart_type=chart_type)

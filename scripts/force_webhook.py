@@ -1,27 +1,22 @@
-import requests
-import os
-import json
 import sys
-from dotenv import load_dotenv
+from pathlib import Path
 
-# Ensure UTF-8 output if possible
+# Add project root to sys.path to allow importing config
+sys.path.append(str(Path(__file__).parent.parent))
+
 try:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
 except:
     pass
 
-load_dotenv()
-
-URL = os.getenv("EVOLUTION_URL", "https://evoapi.tbrflows.transborder.com.co")
-INSTANCE = os.getenv("EVOLUTION_INSTANCE", "test")
-API_KEY = os.getenv("EVOLUTION_API_KEY")
+import config
 
 # URL de ngrok extraida de la captura del usuario
 NGROK_URL = "https://d5f7321225b1.ngrok-free.app/webhook/evolution".strip()
 
 headers = {
-    "apikey": API_KEY,
+    "apikey": config.EVOLUTION_API_KEY,
     "Content-Type": "application/json"
 }
 
@@ -56,7 +51,7 @@ def configure_webhook():
     for payload in [payload_v1, payload_v2]:
         try:
             print(f"\nProbando con payload: {json.dumps(payload)[:100]}...")
-            res = requests.post(f"{URL}/webhook/set/{INSTANCE}", headers=headers, json=payload)
+            res = requests.post(f"{config.EVOLUTION_URL}/webhook/set/{config.EVOLUTION_INSTANCE}", headers=headers, json=payload)
             print(f"Status: {res.status_code}")
             print(f"Response: {res.text}")
             
@@ -67,7 +62,7 @@ def configure_webhook():
             print(f"[ERROR] Intento fallido: {e}")
 
 if __name__ == "__main__":
-    if not API_KEY:
+    if not config.EVOLUTION_API_KEY:
         print("[ERROR] EVOLUTION_API_KEY no encontrado en .env")
     else:
         configure_webhook()
