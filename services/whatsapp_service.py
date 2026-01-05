@@ -110,12 +110,21 @@ class WhatsAppService:
             url = f"{self.base_url}/chat/getBase64FromMediaMessage/{self.instance}"
             payload = {"key": message_key, "convertToMp3": True}
             
+            logger.info(f"💾 Fetching media from: {url}")
             res = await self.client.post(url, json=payload)
             if res.status_code in (200, 201):
-                return res.json().get("base64")
+                data = res.json()
+                base64_data = data.get("base64") or data.get("data")
+                if base64_data:
+                    logger.info("✅ Media recuperada exitosamente")
+                    return base64_data
+                else:
+                    logger.warning(f"⚠️ La respuesta de media no contiene base64: {data.keys()}")
+            else:
+                logger.error(f"❌ Error al recuperar media ({res.status_code}): {res.text}")
             return None
         except Exception as e:
-            logger.error(f"❌ Error en fetch_media: {str(e)}")
+            logger.error(f"❌ Excepción en fetch_media: {str(e)}")
             return None
     
     async def close(self):

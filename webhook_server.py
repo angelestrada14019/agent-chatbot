@@ -5,6 +5,7 @@ Recibe mensajes de EvolutionAPI y los procesa con el Agente Nativo (SDK).
 import json
 import uuid
 import logging
+import httpx
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -37,12 +38,17 @@ app.add_middleware(
 )
 
 class EvolutionPayload(BaseModel):
+    """Payload flexible para evitar errores 422 con eventos no suscritos o cambios en la API"""
     event: Optional[str] = None
+    instance: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
     # Soporte para v1/v2 mixed
     key: Optional[Dict[str, Any]] = None
     message: Optional[Dict[str, Any]] = None
     messageType: Optional[str] = None
+    
+    class Config:
+        extra = "allow" # Permite campos adicionales sin fallar
 
 # Singletons
 agent = EvoDataAgent()
@@ -65,6 +71,8 @@ async def handle_webhook(
     
     phone_number = whatsapp.normalize_phone_number(remote_jid)
     msg_type = data.get("messageType")
+    
+    logger.info(f"📩 Webhook recibido: {msg_type} desde {phone_number}")
 
     # Orquestación de tareas en segundo plano
     if msg_type in ["conversation", "extendedTextMessage"]:
@@ -74,39 +82,78 @@ async def handle_webhook(
             background_tasks.add_task(process_chat_flow, phone_number, text)
             return {"status": "processing"}
             
-    elif msg_type == "audioMessage":
-        background_tasks.add_task(process_chat_flow, phone_number, "", is_voice=True, msg_key=key)
+    elif msg_type in ["audioMessage", "audio"]:
+        # Intentar extraer URL del audio (Evolution v2)
+        message = data.get("message", {})
+        audio_msg = message.get("audioMessage") or message.get("audio") or {}
+        audio_url = audio_msg.get("url")
+        
+        background_tasks.add_task(process_chat_flow, phone_number, "", is_voice=True, msg_key=key, audio_url=audio_url)
         return {"status": "processing"}
 
     return {"status": "unsupported_type"}
 
-async def process_chat_flow(phone_number: str, text: str, is_voice: bool = False, msg_key: dict = None):
+async def process_chat_flow(phone_number: str, text: str, is_voice: bool = False, msg_key: dict = None, audio_url: str = None):
     """Flujo completo: Procesamiento -> Agente -> WhatsApp"""
     try:
         audio_path = None
-        if is_voice and msg_key:
-            # 1. Obtener audio de Evolution
-            base64_audio = await whatsapp.fetch_media(msg_key)
-            if base64_audio:
-                audio_path = Path(config.TEMP_DIR) / f"voice_{uuid.uuid4().hex}.mp3"
-                import base64
-                with open(audio_path, "wb") as f:
-                    f.write(base64.b64decode(base64_audio))
+        if is_voice:
+            audio_path = Path(config.TEMP_DIR) / f"voice_{uuid.uuid4().hex}.mp3"
+            success = False
+            
+            # 1. Intentar descargar por URL si existe (v2)
+            if audio_url:
+                logger.info(f"🔗 Descargando audio desde URL: {audio_url}")
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(audio_url)
+                    if resp.status_code == 200:
+                        with open(audio_path, "wb") as f:
+                            f.write(resp.content)
+                        success = True
+            
+            # 2. Si falló o no había URL, intentar base64 estándar
+            if not success and msg_key:
+                logger.info(f"🎤 Solicitando media base64 para {phone_number}...")
+                base64_audio = await whatsapp.fetch_media(msg_key)
+                if base64_audio:
+                    import base64
+                    with open(audio_path, "wb") as f:
+                        f.write(base64.b64decode(base64_audio))
+                    success = True
+
+            if success:
+                logger.info(f"✅ Audio listo: {audio_path}")
+            else:
+                audio_path = None
+                logger.warning(f"⚠️ No se pudo obtener el audio por ningún método para {phone_number}")
 
         # 2. El Agente procesa (incluye Whisper si hay audio_path)
-        logger.info(f"🤖 Procesando solicitud de {phone_number}")
-        result = await agent.process_message(text, phone_number=phone_number, is_voice=is_voice, audio_path=str(audio_path) if audio_path else None)
+        logger.info(f"🤖 Agente procesando solicitud de {phone_number} (voice={is_voice})")
+        result = await agent.process_message(
+            text, 
+            phone_number=phone_number, 
+            is_voice=is_voice, 
+            audio_path=str(audio_path) if audio_path else None
+        )
         
         # 3. Entrega de resultados
         if result.get("success"):
+            logger.info(f"📤 Enviando respuesta a {phone_number}")
             await whatsapp.send_message_with_response(phone_number, result)
+        else:
+            error_msg = result.get("error", "Error desconocido")
+            logger.error(f"❌ El agente no pudo procesar la solicitud: {error_msg}")
+            # Opcional: Notificar al usuario del error
+            await whatsapp.send_text_message(phone_number, "Lo siento, tuve un problema procesando tu mensaje. ¿Podrías repetirlo?")
         
         # Cleanup
-        if audio_path and audio_path.exists(): audio_path.unlink()
+        if audio_path and audio_path.exists(): 
+            audio_path.unlink()
+            logger.info(f"🗑️ Archivo temporal eliminado: {audio_path}")
         
     except Exception as e:
         from utils.logger import log_error_with_context
-        log_error_with_context(logger, e, {"phone_number": phone_number})
+        log_error_with_context(logger, e, {"phone_number": phone_number, "flow": "voice" if is_voice else "text"})
 
 @app.on_event("shutdown")
 async def shutdown_event():
