@@ -71,15 +71,21 @@ class EvoDataAgent:
             result = await Runner.run(self.agent, message)
             
             # 3. Extracción Inteligente de Resultados (SOLID: SDK Native)
-            # El Runner.run() devuelve un RunResult que contiene los pasos de ejecución.
-            for step in result.steps:
-                for tool_call in getattr(step, "tool_calls", []):
-                    # Acceder directamente al objeto de retorno de la herramienta
-                    if hasattr(tool_call, "result") and hasattr(tool_call.result, "output"):
-                        output = tool_call.result.output
-                        # Verificar si el objeto (ChartResult/ExcelResult) tiene un file_path
-                        if hasattr(output, "file_path") and output.file_path:
-                            attachments.append(output.file_path)
+            # El Runner.run() devuelve un RunResult que contiene 'new_items' (mensajes, tool_calls, etc.)
+            for item in getattr(result, "new_items", []):
+                # En el SDK, los tool calls suelen estar en objetos Message o ToolCall
+                if hasattr(item, "tool_calls") and item.tool_calls:
+                    for tool_call in item.tool_calls:
+                        # Acceder al resultado de la herramienta si está disponible en el item
+                        # O buscar el mensaje de respuesta de la herramienta en new_items
+                        pass
+                
+                # Si el item es un ToolResponseMessage, contiene el objeto de salida
+                if hasattr(item, "role") and item.role == "tool":
+                    # En algunas versiones el objeto real está en 'output' o 'content'
+                    output = getattr(item, "output", None)
+                    if output and hasattr(output, "file_path") and output.file_path:
+                        attachments.append(output.file_path)
 
             return {
                 "success": True,
@@ -89,5 +95,6 @@ class EvoDataAgent:
             }
 
         except Exception as e:
-            logger.log_error_with_context(e, {"phone_number": phone_number, "request_id": request_id})
+            from utils.logger import log_error_with_context
+            log_error_with_context(logger, e, {"phone_number": phone_number, "request_id": request_id})
             return {"success": False, "error": str(e), "request_id": request_id}

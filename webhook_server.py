@@ -17,6 +17,8 @@ from evodata_agent import EvoDataAgent
 from services.whatsapp_service import WhatsAppService
 from utils.logger import get_logger
 
+logger = get_logger("WebhookServer")
+
 app = FastAPI(title=f"{config.AGENT_NAME} API", version=config.AGENT_VERSION)
 
 @app.on_event("startup")
@@ -103,7 +105,8 @@ async def process_chat_flow(phone_number: str, text: str, is_voice: bool = False
         if audio_path and audio_path.exists(): audio_path.unlink()
         
     except Exception as e:
-        logger.log_error_with_context(e, {"phone_number": phone_number})
+        from utils.logger import log_error_with_context
+        log_error_with_context(logger, e, {"phone_number": phone_number})
 
 @app.on_event("shutdown")
 async def shutdown_event():
