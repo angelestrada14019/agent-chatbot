@@ -104,43 +104,60 @@ class WhatsAppService:
             return f"{number}@c.us"
         return number.replace("@s.whatsapp.net", "@c.us")
 
-    async def fetch_media(self, message_key: Dict[str, Any], instance_name: Optional[str] = None) -> Optional[str]:
-        """Obtiene base64 de un mensaje de media de Evolution"""
-        instance = instance_name or self.instance
+    async def fetch_media(self, message_key: Dict[str, Any], instance_name: Optional[str] = None, message_data: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Obtiene base64 de un mensaje de media de Evolution (con fallback y robustez)."""
+        instance = (instance_name or self.instance or "").strip()
         try:
-            url = f"{self.base_url}/chat/getBase64FromMediaMessage/{instance}"
-            # Asegurar que el payload tenga la estructura exacta esperada
-            payload = {
-                "key": {
-                    "remoteJid": message_key.get("remoteJid"),
-                    "fromMe": message_key.get("fromMe", False),
-                    "id": message_key.get("id")
-                }
-            }
+            # 1. Normalizar instance (eliminar invisibles)
+            instance = "".join(ch for ch in instance if ch.isprintable())
+            url = f"{self.base_url.rstrip('/')}/chat/getBase64FromMediaMessage/{instance}"
             
-            logger.info(f"💾 Fetching media for instance '{instance}' from: {url}")
-            logger.debug(f"📦 Payload: {payload}")
+            # 2. Reconstruir KEY completa
+            key = message_key.copy() if message_key else {}
+            if message_data and (not key.get("id") or not key.get("remoteJid")):
+                candidate = message_data.get("key") or message_data.get("message", {}).get("key") or {}
+                if candidate: key = {**candidate, **key}
+            
+            if not key.get("participant") and key.get("remoteJid"):
+                key["participant"] = key.get("remoteJid")
+
+            # 3. Preparar variantes de Payload
+            message_obj = message_data.get("message") if isinstance(message_data, dict) else None
+            
+            payloads = [
+                {"key": key},
+                {"key": key, "message": message_obj},
+                {"message": message_data} if message_data else None
+            ]
+            # Filtrar vacíos y duplicados
+            payloads = [p for p in payloads if p]
+
+            logger.info(f"💾 Recuperando media para {instance} | ID: {key.get('id')}")
             
             async with httpx.AsyncClient(timeout=30.0) as client:
-                res = await client.post(
-                    url, 
-                    json=payload, 
-                    headers={"apikey": self.api_key, "Content-Type": "application/json"}
-                )
-                
-                if res.status_code in (200, 201):
-                    data = res.json()
-                    base64_data = data.get("base64") or data.get("data")
-                    if base64_data:
-                        logger.info("✅ Media recuperada exitosamente")
-                        return base64_data
-                    else:
-                        logger.warning(f"⚠️ La respuesta de media no contiene base64: {list(data.keys())}")
-                else:
-                    logger.error(f"❌ Error al recuperar media ({res.status_code}): {res.text}")
+                for idx, payload in enumerate(payloads):
+                    try:
+                        logger.debug(f"➡️ Intento {idx+1} con payload: {list(payload.keys())}")
+                        res = await client.post(
+                            url, 
+                            json=payload, 
+                            headers={"apikey": self.api_key, "Content-Type": "application/json"}
+                        )
+                        
+                        if res.status_code in (200, 201):
+                            data = res.json()
+                            base64_data = data.get("base64") or data.get("data")
+                            if base64_data:
+                                logger.info(f"✅ Media obtenida con éxito (Intento {idx+1})")
+                                return base64_data
+                        
+                        logger.warning(f"⚠️ Intento {idx+1} falló ({res.status_code}): {res.text[:100]}")
+                    except Exception as e:
+                        logger.error(f"❌ Error en intento {idx+1}: {e}")
+
             return None
         except Exception as e:
-            logger.error(f"❌ Excepción en fetch_media: {str(e)}")
+            logger.error(f"❌ Excepción crítica en fetch_media: {str(e)}")
             return None
     
     async def close(self):
