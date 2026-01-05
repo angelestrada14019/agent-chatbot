@@ -196,19 +196,7 @@ async def evolution_webhook(
         
         logger.info(f"💬 Texto: {text[:50]}...")
         
-        # Comandos especiales
-        if text.lower() in ['hola', 'help', 'ayuda', 'inicio']:
-            # Responder inmediatamente con greeting
-            greeting = MessageTemplates.greeting()
-            agent.send_whatsapp_message(phone_number, {
-                "success": True,
-                "response_type": "text",
-                "content": greeting,
-                "attachments": []
-            })
-            return WebhookResponse(status="ok", action="greeting")
-        
-        # Procesar mensaje normal en background
+        # Procesar mensaje normal en background (AI driven)
         background_tasks.add_task(
             process_text_message,
             agent,
@@ -228,7 +216,7 @@ async def process_voice_message(agent: EvoDataAgent, phone_number: str, message_
     try:
         # 1. Obtener audio decodificado desde EvolutionAPI (Base64)
         logger.info(f"🔄 Solicitando audio decodificado para {message_key.get('id')}...")
-        base64_audio = agent.whatsapp_service.fetch_media(message_key)
+        base64_audio = await agent.whatsapp_service.fetch_media(message_key)
         
         if not base64_audio:
             error_msg = "❌ No pude recuperar el audio desde EvolutionAPI. Verifica la configuración."

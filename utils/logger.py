@@ -141,12 +141,13 @@ class AgentLogger:
 
 # Thread-safe singleton
 import threading
-_logger_instance = None
+# Dict of logger instances
+_logger_instances: Dict[str, AgentLogger] = {}
 _logger_lock = threading.Lock()
 
 def get_logger(name: str = "EvoDataAgent") -> AgentLogger:
     """
-    Obtiene instancia del logger (singleton thread-safe)
+    Obtiene instancia del logger (cache por nombre)
     
     Args:
         name: Nombre del logger
@@ -154,12 +155,10 @@ def get_logger(name: str = "EvoDataAgent") -> AgentLogger:
     Returns:
         AgentLogger instance
     """
-    global _logger_instance
+    global _logger_instances
     
-    # Double-checked locking para thread safety
-    if _logger_instance is None:
-        with _logger_lock:
-            if _logger_instance is None:
-                _logger_instance = AgentLogger(name)
+    with _logger_lock:
+        if name not in _logger_instances:
+            _logger_instances[name] = AgentLogger(name)
     
-    return _logger_instance
+    return _logger_instances[name]

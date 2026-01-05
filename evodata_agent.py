@@ -36,7 +36,7 @@ class EvoDataAgent:
         # Servicios
         self.message_processor = MessageProcessor()
         self.whatsapp_service = WhatsAppService()
-        self.intent_router = IntentRouter()
+        self.intent_router = IntentRouter(message_processor=self.message_processor)
         self.response_formatter = ResponseFormatter()
         
         logger.info(f"🤖 {config.AGENT_NAME} v{config.AGENT_VERSION} inicializado")

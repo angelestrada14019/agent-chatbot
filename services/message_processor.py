@@ -115,6 +115,99 @@ class MessageProcessor:
         """
         return bool(message and message.strip())
     
+    async def get_chat_completion(self, message: str, system_prompt: Optional[str] = None) -> str:
+        """
+        Obtiene una respuesta de chat de OpenAI GPT (Async)
+        
+        Args:
+            message: Mensaje del usuario
+            system_prompt: Prompt de sistema opcional
+            
+        Returns:
+            str: Respuesta generada
+        """
+        try:
+            if not system_prompt:
+                system_prompt = (
+                    f"Eres {config.AGENT_NAME}, un asistente experto en análisis de datos. "
+                    "Responde de forma profesional, amable y concisa. "
+                    "Ayuda al usuario a entender sus datos y cómo usar las herramientas disponibles."
+                )
+            
+            # OpenAI Python SDK ≥ 1.0 supports async, but the sync client can be used with a thread pool 
+            # or just use the OpenAI client normally if it doesn't block much (for few tokens).
+            # Better to use the sync client with a thread for now if we don't want to change the whole init.
+            # Actually, let's use the standard call as it's common in this codebase.
+            
+            logger.info(f"🤖 Solicitando respuesta a OpenAI ({config.CHAT_MODEL})...")
+            
+            response = self.openai_client.chat.completions.create(
+                model=config.CHAT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message}
+                ],
+                temperature=0.7
+            )
+            
+            reply = response.choices[0].message.content
+            logger.info("✅ Respuesta de IA generada")
+            return reply
+            
+        except Exception as e:
+            logger.error(f"❌ Error en chat completion: {str(e)}")
+            return "Lo siento, tuve un problema al procesar tu solicitud con la IA. ¿Podrías intentar de nuevo?"
+
+    async def get_intent_classification(self, message: str) -> str:
+        """
+        Clasifica la intención del usuario usando GPT (Async)
+        
+        Args:
+            message: Mensaje del usuario
+            
+        Returns:
+            str: Intención (query, visualization, export, analysis, calculation, chat)
+        """
+        try:
+            system_prompt = (
+                "Clasifica el mensaje del usuario en una de las siguientes intenciones. "
+                "Responde ÚNICAMENTE con la palabra clave de la intención:\n"
+                "- query: Consultas simples de datos (ej: 'ver ventas', 'productos')\n"
+                "- visualization: Solicitud de gráficos (ej: 'grafica las ventas', 'haz un gráfico')\n"
+                "- export: Exportación a Excel (ej: 'descarga en excel', 'genera reporte')\n"
+                "- analysis: Análisis completo (ej: 'analiza las ventas del trimestre con gráfica y excel')\n"
+                "- calculation: Cálculos matemáticos (ej: 'suma esto', 'promedio')\n"
+                "- chat: Saludos, agradecimientos o conversación general (ej: 'hola', 'gracias', 'qué puedes hacer')\n"
+                "\nResponde solo con el nombre de la intención."
+            )
+            
+            logger.info(f"🎯 Clasificando intención con IA...")
+            
+            response = self.openai_client.chat.completions.create(
+                model=config.CHAT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message}
+                ],
+                temperature=0, # Determinístico
+                max_tokens=10
+            )
+            
+            intent = response.choices[0].message.content.lower().strip()
+            # Validar que sea una de las permitidas
+            valid_intents = ["query", "visualization", "export", "analysis", "calculation", "chat"]
+            
+            if intent not in valid_intents:
+                logger.warning(f"⚠️ IA devolvió intención inválida: {intent}. Usando fallback 'chat'.")
+                return "chat"
+                
+            logger.info(f"🎯 Intención detectada: {intent}")
+            return intent
+            
+        except Exception as e:
+            logger.error(f"❌ Error en clasificación de intención: {str(e)}")
+            return "chat" # Fallback a chat
+
     def normalize_text(self, text: str) -> str:
         """
         Normaliza texto del usuario
@@ -125,6 +218,7 @@ class MessageProcessor:
         Returns:
             str: Texto normalizado
         """
+        if not text: return ""
         # Eliminar espacios extra
         normalized = " ".join(text.split())
         

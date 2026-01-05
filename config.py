@@ -44,6 +44,7 @@ MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8002/sse")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "whisper-1")  # OpenAI API model
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "es")  # Spanish by default
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o")  # Main model for intent and chat
 
 # ========================================
 # 📊 VISUALIZATION SETTINGS

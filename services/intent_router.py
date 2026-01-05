@@ -82,13 +82,15 @@ class IntentRouter:
     Implementa Strategy Pattern para clasificación
     """
     
-    def __init__(self, classification_strategy: Optional[IntentStrategy] = None):
+    def __init__(self, message_processor: Any, classification_strategy: Optional[IntentStrategy] = None):
         """
         Inicializa el router
         
         Args:
+            message_processor: Instancia de MessageProcessor para tareas de IA
             classification_strategy: Estrategia de clasificación (default: KeywordBased)
         """
+        self.message_processor = message_processor
         self.strategy = classification_strategy or KeywordBasedIntentStrategy()
         # Usar adapter que usa MCPClient por debajo
         self.db_connector = get_mcp_client() 
@@ -97,7 +99,7 @@ class IntentRouter:
         self.calculator = get_calculator()
         self.response_formatter = ResponseFormatter()
         
-        logger.info("✅ IntentRouter inicializado (Conectado vía MCP)")
+        logger.info("✅ IntentRouter inicializado con soporte de IA")
     
     async def route_message(self, message: str, request_id: str) -> Dict[str, Any]:
         """
@@ -110,8 +112,13 @@ class IntentRouter:
         Returns:
             Dict: Respuesta formateada
         """
-        # Clasificar intención
-        intent = self.strategy.classify(message)
+        # Clasificar intención usando IA si es posible, de lo contrario keywords
+        if hasattr(self.message_processor, 'get_intent_classification'):
+            intent = await self.message_processor.get_intent_classification(message)
+        else:
+            intent = self.strategy.classify(message)
+            
+        logger.info(f"🎯 Intención final: {intent}")
         
         # Enrutar a handler
         handlers = {
@@ -119,10 +126,11 @@ class IntentRouter:
             "visualization": self._handle_visualization,
             "export": self._handle_export,
             "calculation": self._handle_calculation,
-            "analysis": self._handle_analysis
+            "analysis": self._handle_analysis,
+            "chat": self._handle_chat
         }
         
-        handler = handlers.get(intent, self._handle_query)
+        handler = handlers.get(intent, self._handle_chat)
         
         try:
             return await handler(message, request_id)
@@ -133,6 +141,19 @@ class IntentRouter:
                 error_type=intent,
                 request_id=request_id
             )
+
+    async def _handle_chat(self, message: str, request_id: str) -> Dict[str, Any]:
+        """Handler para conversación general usando IA (Async)"""
+        logger.info("💬 Procesando respuesta de chat con IA...")
+        
+        response_text = await self.message_processor.get_chat_completion(message)
+        
+        return {
+            "success": True,
+            "response": response_text,
+            "response_type": "text",
+            "request_id": request_id
+        }
     
     async def _handle_query(self, message: str, request_id: str) -> Dict[str, Any]:
         """Handler para consultas de datos simples (Async)"""
