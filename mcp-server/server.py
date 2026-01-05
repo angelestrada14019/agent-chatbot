@@ -3,24 +3,23 @@ import asyncio
 import logging
 import json
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional
+from typing import Any, List
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from sse_starlette.sse import EventSourceResponse
-from pydantic import BaseModel
-
-from mcp.server.sse import SseServerTransport
 from mcp.server import Server
-from mcp.types import Resource, Tool, TextContent, ImageContent, EmbeddedResource
+from mcp.server.sse import SseServerTransport
+from mcp.types import Tool, TextContent
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from starlette.applications import Starlette
+from starlette.routing import Route
 
-# Configurar Logging
+# ==========================================
+# 📝 CONFIGURACIÓN Y LOGGING
+# ==========================================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("MCPServer-SSE")
+logger = logging.getLogger("MCPServer-Standard")
 
-# Configuración de BD desde Variables de Entorno
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
     "port": os.getenv("DB_PORT", "5432"),
@@ -29,52 +28,47 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", "postgres")
 }
 
-# Inicializar Servidor MCP
-mcp = Server("postgres-mcp-server")
-
-# Transport para SSE
+# ==========================================
+# 🔌 MCP SERVER CORE
+# ==========================================
+mcp = Server("evodata-mcp-server")
 sse_transport = SseServerTransport("/messages")
 
 def get_db_connection():
-    """Obtiene conexión a la base de datos"""
+    """Conexión robusta a PostgreSQL"""
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        logger.info("✅ Conexión a BD establecida")
-        return conn
+        return psycopg2.connect(**DB_CONFIG)
     except Exception as e:
-        logger.error(f"❌ Error conectando a BD: {e}")
+        logger.error(f"❌ Error DB: {e}")
         raise
 
 @mcp.list_tools()
 async def list_tools() -> list[Tool]:
-    """Lista las herramientas disponibles"""
+    """Define las herramientas disponibles para el Agent SDK"""
     return [
         Tool(
             name="query",
-            description="Ejecuta una consulta SQL segura (SELECT) en la base de datos de análisis (Tablas: ventas, productos, clientes)",
+            description="Ejecuta una consulta SQL SELECT para obtener datos de compras, productos o clientes.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "sql": {
-                        "type": "string",
-                        "description": "Consulta SQL SELECT a ejecutar"
-                    }
+                    "sql": {"type": "string", "description": "Consulta SQL SELECT válida"}
                 },
                 "required": ["sql"]
             }
         ),
         Tool(
             name="list_tables",
-            description="Lista las tablas disponibles en la base de datos",
+            description="Lista las tablas disponibles para entender la estructura de datos.",
             inputSchema={"type": "object", "properties": {}}
         ),
         Tool(
             name="get_schema",
-            description="Obtiene el esquema de una tabla específica",
+            description="Obtiene las columnas y tipos de datos de una tabla específica.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "table_name": {"type": "string"}
+                    "table_name": {"type": "string", "description": "Nombre de la tabla"}
                 },
                 "required": ["table_name"]
             }
@@ -83,8 +77,8 @@ async def list_tools() -> list[Tool]:
 
 @mcp.call_tool()
 async def call_tool(name: str, arguments: Any) -> List[TextContent]:
-    """Ejecuta una herramienta"""
-    logger.info(f"🛠️ Ejecutando herramienta: {name} con args: {arguments}")
+    """Manejador universal de herramientas siguiendo el protocolo MCP"""
+    logger.info(f"🛠️ Ejecutando herramienta: {name} | Args: {arguments}")
     
     conn = None
     try:
@@ -92,94 +86,74 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         if name == "query":
-            sql = arguments.get("sql")
+            sql = arguments.get("sql", "")
             if not sql.lower().strip().startswith("select"):
-                raise ValueError("Solo se permiten consultas SELECT por seguridad")
-                
+                return [TextContent(type="text", text="Error: Solo se permiten consultas SELECT por seguridad.")]
+            
             cursor.execute(sql)
             results = cursor.fetchall()
-            
-            # Convertir resultados a JSON string para enviarlos como texto
-            return [TextContent(type="text", text=json.dumps(results, default=str, indent=2))]
+            return [TextContent(type="text", text=json.dumps(results, default=str))]
             
         elif name == "list_tables":
             cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
             tables = [row['table_name'] for row in cursor.fetchall()]
-            return [TextContent(type="text", text=json.dumps(tables, indent=2))]
+            return [TextContent(type="text", text=json.dumps(tables))]
             
         elif name == "get_schema":
             table_name = arguments.get("table_name")
-            cursor.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{table_name}'")
+            cursor.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = %s", (table_name,))
             columns = cursor.fetchall()
-            return [TextContent(type="text", text=json.dumps(columns, indent=2))]
+            return [TextContent(type="text", text=json.dumps(columns))]
             
         else:
-            raise ValueError(f"Herramienta desconocida: {name}")
+            return [TextContent(type="text", text=f"Error: Herramienta '{name}' no encontrada.")]
             
     except Exception as e:
-        logger.error(f"❌ Error ejecutando tool {name}: {e}")
-        return [TextContent(type="text", text=f"Error: {str(e)}")]
+        logger.error(f"❌ Error en tool {name}: {e}")
+        return [TextContent(type="text", text=f"Error en base de datos: {str(e)}")]
     finally:
         if conn:
             conn.close()
 
 # ==========================================
-# Configuración FastAPI + SSE
+# 🌐 STARLETTE ASGI INTERFACE
 # ==========================================
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("🚀 Iniciando Servidor MCP (SSE Mode)...")
-    yield
-    # Shutdown
-    logger.info("🛑 Deteniendo Servidor MCP...")
-
-app = FastAPI(lifespan=lifespan)
-
-from fastapi import Response
-
-@app.get("/sse")
-async def handle_sse(request: Request):
-    """Endpoint para la conexión SSE"""
-    # Usar el send directamente del scope para máxima compatibilidad
-    scope = request.scope
-    receive = request.receive
-    send = scope.get("send")
-    
-    if send is None:
-        logger.error("❌ El scope de FastAPI no tiene el callable 'send'")
-        return Response("Internal Server Error", status_code=500)
-
+async def handle_sse(scope, receive, send):
+    """Handler ASGI puro para la conexión de streaming SSE"""
     try:
-        async with sse_transport.connect_sse(scope, receive, send) as stream:
+        async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
             await mcp.run(
-                stream[0], stream[1], mcp.create_initialization_options()
+                read_stream, 
+                write_stream, 
+                mcp.create_initialization_options()
             )
     except Exception as e:
-        logger.error(f"❌ Error en session SSE: {str(e)}")
-        # No relanzar para evitar crash del worker
-        
-    return Response()
+        logger.error(f"❌ Error SSE: {e}")
 
-@app.post("/messages")
-async def handle_messages(request: Request):
-    """Endpoint para recibir mensajes del cliente (POST)"""
-    scope = request.scope
-    receive = request.receive
-    send = scope.get("send")
-    
-    if send is None:
-        return Response("Internal Server Error", status_code=500)
-
+async def handle_messages(scope, receive, send):
+    """Handler ASGI para recibir mensajes POST del cliente"""
     try:
         await sse_transport.handle_post_message(scope, receive, send)
     except Exception as e:
-        logger.error(f"❌ Error en handle_messages (POST): {str(e)}")
-        
-    return Response()
+        logger.error(f"❌ Error POST: {e}")
+
+@asynccontextmanager
+async def lifespan(app: Starlette):
+    logger.info("🚀 Servidor MCP (SSE Mode) iniciado")
+    yield
+    logger.info("🛑 Servidor MCP detenido")
+
+# Definición de la aplicación Starlette para máxima compatibilidad ASGI
+app = Starlette(
+    debug=True,
+    lifespan=lifespan
+)
+
+# Registramos las rutas como aplicaciones ASGI puras para evitar conflictos de respuesta
+app.add_route("/sse", handle_sse, methods=["GET"])
+app.add_route("/messages", handle_messages, methods=["POST"])
 
 if __name__ == "__main__":
     import uvicorn
-    # Escuchar en todas las interfaces dentro del contenedor
     uvicorn.run(app, host="0.0.0.0", port=8002)

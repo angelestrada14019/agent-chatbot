@@ -1,23 +1,23 @@
 version: '3.8'
 
 services:
-  mcp-server:
+  mcp-simulator:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: mcp-simulator
     environment:
-      - DB_HOST=${DB_HOST:-postgres}
-      - DB_PORT=${DB_PORT:-5432}
-      - DB_NAME=${DB_NAME:-analytics}
-      - DB_USER=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_HOST=mcp-postgres
+      - DB_PORT=5432
+      - DB_NAME=analytics
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
     ports:
       - "8002:8002"
     volumes:
       - .:/app
     networks:
-      - mcp-network
+      - mct-network
     restart: unless-stopped
     command: ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8002"]
 
@@ -40,12 +40,13 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - mcp-network
+      - mct-network
 
 volumes:
   postgres_data:
     driver: local
 
 networks:
-  mcp-network:
-    driver: bridge
+  mct-network:
+    external: true
+    name: mct-network

@@ -16,7 +16,7 @@ services:
       - EVOLUTION_URL=${EVOLUTION_URL}
       - EVOLUTION_INSTANCE=${EVOLUTION_INSTANCE}
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
-      - MCP_SERVER_URL=http://host.docker.internal:8002/sse
+      - MCP_SERVER_URL=http://mcp-simulator:8002/sse
       - WEBHOOK_SERVER_PORT=5000
       - FILE_SERVER_PORT=8001
     
@@ -33,11 +33,10 @@ services:
       - ./temp:/app/temp
     
     networks:
-      - evodata-network
+      - mct-network
     restart: unless-stopped
 
-
-
 networks:
-  evodata-network:
+  mct-network:
+    name: mct-network
     driver: bridge
