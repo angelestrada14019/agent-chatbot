@@ -20,8 +20,9 @@ COPY . .
 # Crear directorios necesarios
 RUN mkdir -p logs exports temp
 
-# Dar permisos al entrypoint
-RUN chmod +x entrypoint.sh
+# Convertir line endings (CRLF -> LF) y dar permisos al entrypoint
+# Esto soluciona problemas de compatibilidad cuando el repo se clona en Windows
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 # Exponer puertos
 EXPOSE 5000 8001
