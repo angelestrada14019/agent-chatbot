@@ -4,7 +4,10 @@ Orquestador principal basado en el SDK oficial de OpenAI Agents.
 Cumplimiento 100% con SOLID y Clean Code.
 """
 import uuid
+import os
+import time
 from typing import Dict, Any, Optional, List
+from pathlib import Path
 from pydantic import BaseModel
 
 from agents import Agent, Runner
@@ -43,11 +46,11 @@ class EvoDataAgent:
             instructions=(
                 f"Eres {config.AGENT_NAME}, el analista de datos oficial de M.C.T. SAS. "
                 "Tu misión es proporcionar insights profesionales sobre cualquier base de datos conectada vía MCP. "
-                "\\n\\nESTRATEGIA:"
-                "\\n1. Explora las herramientas disponibles en el servidor MCP para entender qué datos puedes consultar (ventas, stock, clientes, etc.)."
-                "\\n2. Ejecuta consultas SQL SELECT precisas según la necesidad del usuario."
-                "\\n3. Genera gráficas o excels según la solicitud del usuario usando tus herramientas locales."
-                "\\n4. Sé profesional y estructurado en español."
+                "\n\nESTRATEGIA:"
+                "\n1. Explora las herramientas disponibles en el servidor MCP para entender qué datos puedes consultar (ventas, stock, clientes, etc.)."
+                "\n2. Ejecuta consultas SQL SELECT precisas según la necesidad del usuario."
+                "\n3. Genera gráficas o excels según la solicitud del usuario usando tus herramientas locales."
+                "\n4. Sé profesional y estructurado en español."
             ),
             model=config.CHAT_MODEL,
             mcp_servers=[self.mcp_server],
@@ -128,6 +131,16 @@ class EvoDataAgent:
             # 0. Asegurar Conexión MCP (Fix: Server not initialized)
             await self._ensure_mcp_connected()
 
+            # 0.1 Capturar archivos existentes ANTES de procesar (método robusto)
+            exports_dir = Path(config.EXPORTS_DIR)
+            files_before: Dict[str, float] = {}
+            if exports_dir.exists():
+                for f in exports_dir.iterdir():
+                    if f.is_file():
+                        files_before[f.name] = f.stat().st_mtime
+            
+            timestamp_before = time.time()
+
             # 1. Voz a Texto (Si aplica)
             if is_voice and audio_path:
                 message = await transcribe_audio(audio_path)
@@ -147,33 +160,29 @@ class EvoDataAgent:
             # 3. Ejecutar Runner del SDK con Memoria
             result = await Runner.run(self.agent, message, session=session)
             
-            # 4. Extracción Inteligente de Archivos (FIX CRÍTICO)
-            # El SDK serializa tool outputs como texto, debemos parsear file_path
-            import re
-            from pathlib import Path
+            # 4. Detectar archivos NUEVOS en exports (método robusto)
+            # Comparar archivos antes y después - detecta cualquier archivo nuevo o modificado
+            if exports_dir.exists():
+                for file_path in exports_dir.iterdir():
+                    if file_path.is_file():
+                        file_name = file_path.name
+                        file_mtime = file_path.stat().st_mtime
+                        
+                        # Archivo nuevo o modificado después de timestamp_before
+                        is_new = file_name not in files_before
+                        is_modified = file_mtime > timestamp_before
+                        
+                        if is_new or is_modified:
+                            # Solo incluir archivos típicos de exportación
+                            if file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.xlsx', '.csv', '.pdf']:
+                                attachments.append(str(file_path))
+                                logger.info(f"📎 Archivo detectado: {file_path}")
             
-            for item in getattr(result, "new_items", []):
-                # Buscar respuestas de herramientas (role="tool")
-                if hasattr(item, "role") and item.role == "tool":
-                    # Obtener contenido del mensaje de la herramienta
-                    content = ""
-                    if hasattr(item, "content"):
-                        # El contenido puede ser string o lista de ContentBlock
-                        if isinstance(item.content, str):
-                            content = item.content
-                        elif isinstance(item.content, list) and len(item.content) > 0:
-                            content = str(item.content[0].text if hasattr(item.content[0], 'text') else item.content[0])
-                    
-                    # Pattern para encontrar file_path en el output
-                    # Ejemplo: file_path='exports/chart_bar_20260113.png' o file_path=exports/file.xlsx
-                    matches = re.findall(r'file_path[\"\']\s*[=:]\s*[\"\']?([^\s\"\'\)\}]+)', content)
-                    for match in matches:
-                        file_path = Path(match)
-                        if file_path.exists():
-                            attachments.append(str(file_path))
-                            logger.info(f"📎 Archivo detectado: {file_path}")
-                        else:
-                            logger.warning(f"⚠️ Archivo mencionado pero no existe: {file_path}")
+            # Log si no se detectaron archivos pero hay texto sobre archivos generados
+            if not attachments:
+                output_text = result.final_output or ""
+                if any(kw in output_text.lower() for kw in ["chart", "excel", "gráfica", "grafica", "reporte", "archivo"]):
+                    logger.warning("⚠️ El agente menciona archivos pero no se detectaron en exports/")
 
             return {
                 "success": True,
@@ -209,7 +218,6 @@ class EvoDataAgent:
                 response_text = response_text[:config.VOICE_RESPONSE_MAX_CHARS] + "..."
             
             # Generar audio
-            from pathlib import Path
             voice_path = Path(config.TEMP_DIR) / f"response_{uuid.uuid4().hex}.mp3"
             
             success = await self.tts.text_to_speech(response_text, str(voice_path))
