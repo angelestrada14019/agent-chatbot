@@ -13,6 +13,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from starlette.applications import Starlette
 from starlette.routing import Route
+from starlette.responses import Response
 
 # ==========================================
 # 📝 CONFIGURACIÓN Y LOGGING
@@ -116,27 +117,41 @@ async def call_tool(name: str, arguments: Any) -> List[TextContent]:
             conn.close()
 
 # ==========================================
-# 🌐 STARLETTE ASGI INTERFACE
+# 🌐 STARLETTE ASGI INTERFACE & ADAPTERS
 # ==========================================
 
-async def handle_sse(scope, receive, send):
-    """Handler ASGI puro para la conexión de streaming SSE"""
-    try:
-        async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
-            await mcp.run(
-                read_stream, 
-                write_stream, 
-                mcp.create_initialization_options()
-            )
-    except Exception as e:
-        logger.error(f"❌ Error SSE: {e}")
+class MCPAsgiResponse(Response):
+    """
+    Adaptador que permite ejecutar una aplicación ASGI pura (como el transporte MCP)
+    dentro del ciclo de vida de una respuesta de Starlette/FastAPI.
+    """
+    def __init__(self, asgi_app):
+        self.asgi_app = asgi_app
+        self.background = None # Requerido por la firma de Response
 
-async def handle_messages(scope, receive, send):
-    """Handler ASGI para recibir mensajes POST del cliente"""
-    try:
-        await sse_transport.handle_post_message(scope, receive, send)
-    except Exception as e:
-        logger.error(f"❌ Error POST: {e}")
+    async def __call__(self, scope, receive, send):
+        await self.asgi_app(scope, receive, send)
+
+async def handle_sse_asgi(scope, receive, send):
+    """Lógica ASGI pura para SSE"""
+    async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
+        await mcp.run(
+            read_stream, 
+            write_stream, 
+            mcp.create_initialization_options()
+        )
+
+async def handle_messages_asgi(scope, receive, send):
+    """Lógica ASGI pura para Mensajes"""
+    await sse_transport.handle_post_message(scope, receive, send)
+
+async def sse_endpoint(request):
+    """Endpoint HTTP compatible con Starlette que delega al handler ASGI"""
+    return MCPAsgiResponse(handle_sse_asgi)
+
+async def messages_endpoint(request):
+    """Endpoint HTTP compatible con Starlette que delega al handler ASGI"""
+    return MCPAsgiResponse(handle_messages_asgi)
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
@@ -144,15 +159,14 @@ async def lifespan(app: Starlette):
     yield
     logger.info("🛑 Servidor MCP detenido")
 
-# Definición de la aplicación Starlette para máxima compatibilidad ASGI
 app = Starlette(
     debug=True,
-    lifespan=lifespan
+    lifespan=lifespan,
+    routes=[
+        Route("/sse", endpoint=sse_endpoint),
+        Route("/messages", endpoint=messages_endpoint, methods=["POST"])
+    ]
 )
-
-# Registramos las rutas como aplicaciones ASGI puras para evitar conflictos de respuesta
-app.add_route("/sse", handle_sse, methods=["GET"])
-app.add_route("/messages", handle_messages, methods=["POST"])
 
 if __name__ == "__main__":
     import uvicorn

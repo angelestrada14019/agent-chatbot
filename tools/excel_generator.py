@@ -23,28 +23,47 @@ class ExcelResult(BaseModel):
     filename: str = Field(..., description="Nombre del archivo generado")
 
 class ExcelManager:
-    """Gestiona la creación de archivos Excel"""
+    """Gestiona la creación de archivos Excel usando Storage Provider"""
     def __init__(self):
-        self.output_dir = Path(config.EXPORTS_DIR)
+        from services.storage_provider import get_storage_provider
+        self.storage = get_storage_provider()
 
     def generate(self, data: pd.DataFrame, filename: str) -> str:
+        """
+        Genera archivo Excel usando Storage Provider.
+        
+        Args:
+            data: DataFrame con los datos
+            filename: Nombre del archivo
+        
+        Returns:
+            Path del archivo generado
+        """
+        from io import BytesIO
+        
         if not filename.endswith(".xlsx"):
             filename += ".xlsx"
         
-        path = self.output_dir / filename
-        
-        with pd.ExcelWriter(path, engine='openpyxl') as writer:
+        # Generar Excel en memoria
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine='openpyxl') as writer:
             data.to_excel(writer, index=False, sheet_name="Reporte")
             
-            # Ajustar anchos
+            # Ajustar anchos de columnas
             workbook = writer.book
             worksheet = writer.sheets["Reporte"]
             for idx, col in enumerate(data.columns):
                 max_len = max(data[col].astype(str).map(len).max(), len(col)) + 2
-                worksheet.column_dimensions[chr(65 + idx)].width = min(max_len, 50)
+                col_letter = chr(65 + idx) if idx < 26 else f"A{chr(65 + idx - 26)}"
+                worksheet.column_dimensions[col_letter].width = min(max_len, 50)
 
-        logger.info(f"✅ Excel generado en: {path}")
-        return str(path)
+        buf.seek(0)
+        excel_data = buf.read()
+        
+        # Usar storage provider para guardar
+        path = self.storage.save(excel_data, filename)
+        logger.info(f"✅ Excel generado: {path}")
+        return path
 
 excel_manager = ExcelManager()
 

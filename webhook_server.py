@@ -28,6 +28,14 @@ async def startup_event():
     for directory in [config.TEMP_DIR, config.EXPORTS_DIR, config.LOGS_DIR]:
         os.makedirs(directory, exist_ok=True)
     logger.info("📁 Directorios de sistema inicializados")
+    
+    # Cleanup automático de archivos antiguos
+    if config.STORAGE_SAVE_FILES:
+        from services.storage_provider import get_storage_provider
+        storage = get_storage_provider()
+        cleanup_count = storage.cleanup_old_files(config.STORAGE_CLEANUP_DAYS)
+        if cleanup_count > 0:
+            logger.info(f"🧺 Limpieza: {cleanup_count} archivo(s) antiguo(s) eliminado(s)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -156,7 +164,27 @@ async def process_chat_flow(
         # 3. Respuesta
         if result.get("success"):
             logger.info(f"📤 Respuesta lista para {phone_number}")
+            
+            # Prioridad: Si hay nota de voz, enviarla primero (usuario envió voz)
+            voice_note = result.get("voice_note")
+            if voice_note:
+                await whatsapp.send_voice_note(phone_number, voice_note)
+                # Limpiar archivo temporal de voz
+                Path(voice_note).unlink(missing_ok=True)
+                logger.debug(f"🗑️ Audio temporal eliminado: {voice_note}")
+            
+            # Enviar texto y archivos (siempre, como complemento o principal)
             await whatsapp.send_message_with_response(phone_number, result)
+            
+            # Borrar archivos si STORAGE_SAVE_FILES=false
+            if not config.STORAGE_SAVE_FILES:
+                files = result.get("files", [])
+                for file_path in files:
+                    try:
+                        Path(file_path).unlink(missing_ok=True)
+                        logger.debug(f"🗑️ Archivo temporal eliminado: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ No se pudo borrar {file_path}: {e}")
         else:
             error_msg = result.get("error", "Error desconocido")
             logger.error(f"❌ Error del agente: {error_msg}")

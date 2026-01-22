@@ -39,12 +39,27 @@ EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "9447C9B9D3FD-4F9B-A45C-0CF64
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8002/sse")
 
 # ========================================
+# 💾 STORAGE CONFIGURATION
+# ========================================
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local")  # local, s3, azure (futuro)
+STORAGE_SAVE_FILES = os.getenv("STORAGE_SAVE_FILES", "true").lower() == "true"
+STORAGE_CLEANUP_DAYS = int(os.getenv("STORAGE_CLEANUP_DAYS", "7"))
+
+# ========================================
 # 🎤 OPENAI WHISPER API CONFIGURATION
 # ========================================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "whisper-1")  # OpenAI API model
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "es")  # Spanish by default
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o")  # Main model for intent and chat
+
+# ========================================
+# 🎤 TEXT-TO-SPEECH (ELEVENLABS)
+# ========================================
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Rachel (Spanish)
+ENABLE_VOICE_RESPONSES = os.getenv("ENABLE_VOICE_RESPONSES", "false").lower() == "true"
+VOICE_RESPONSE_MAX_CHARS = int(os.getenv("VOICE_RESPONSE_MAX_CHARS", "500"))
 
 # ========================================
 # 📊 VISUALIZATION SETTINGS

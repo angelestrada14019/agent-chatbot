@@ -78,6 +78,47 @@ class WhatsAppService:
             logger.error(f"❌ Error enviando adjunto {file_path}: {str(e)}")
             return False
 
+    async def send_voice_note(self, phone_number: str, audio_path: str) -> bool:
+        """
+        Envía nota de voz (audio/mp3) de forma asíncrona.
+        
+        Args:
+            phone_number: Número del destinatario
+            audio_path: Path al archivo de audio MP3
+        
+        Returns:
+            True si se envío correctamente
+        """
+        try:
+            path = Path(audio_path)
+            if not path.exists():
+                logger.error(f"❌ Audio no encontrado: {audio_path}")
+                return False
+            
+            # Leer archivo de audio
+            with open(path, "rb") as f:
+                data_b64 = base64.b64encode(f.read()).decode('utf-8')
+            
+            url = f"{self.base_url}/message/sendMedia/{self.instance}"
+            payload = {
+                "number": phone_number,
+                "mediatype": "audio",
+                "mimetype": "audio/mpeg",
+                "media": data_b64,
+                "fileName": "respuesta_voz.mp3"
+            }
+            
+            res = await self.client.post(url, json=payload)
+            if res.status_code in (200, 201):
+                logger.info(f"🎤 Nota de voz enviada a {phone_number}")
+                return True
+            else:
+                logger.error(f"❌ Error enviando voz ({res.status_code}): {res.text}")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Error enviando voz a {phone_number}: {str(e)}")
+            return False
+
     async def send_message_with_response(self, phone_number: str, response_data: Dict[str, Any]) -> bool:
         """
         Envía la respuesta del agente (texto + archivos) de forma asíncrona.

@@ -43,11 +43,11 @@ class EvoDataAgent:
             instructions=(
                 f"Eres {config.AGENT_NAME}, el analista de datos oficial de M.C.T. SAS. "
                 "Tu misión es proporcionar insights profesionales sobre cualquier base de datos conectada vía MCP. "
-                "\n\nESTRATEGIA:"
-                "\n1. Explora las herramientas disponibles en el servidor MCP para entender qué datos puedes consultar (ventas, stock, clientes, etc.)."
-                "\n2. Ejecuta consultas SQL SELECT precisas según la necesidad del usuario."
-                "\n3. Genera gráficas o excels según la solicitud del usuario usando tus herramientas locales."
-                "\n4. Sé profesional y estructurado en español."
+                "\\n\\nESTRATEGIA:"
+                "\\n1. Explora las herramientas disponibles en el servidor MCP para entender qué datos puedes consultar (ventas, stock, clientes, etc.)."
+                "\\n2. Ejecuta consultas SQL SELECT precisas según la necesidad del usuario."
+                "\\n3. Genera gráficas o excels según la solicitud del usuario usando tus herramientas locales."
+                "\\n4. Sé profesional y estructurado en español."
             ),
             model=config.CHAT_MODEL,
             mcp_servers=[self.mcp_server],
@@ -59,18 +59,56 @@ class EvoDataAgent:
         )
         # Memoria persistente basada en SQLite
         self.sessions: Dict[str, SQLiteSession] = {}
-        logger.info(f" Agente '{config.AGENT_NAME}' inicializado con soporte de Memoria")
+        
+        # TTS Service para respuestas de voz
+        from services.tts_service import get_tts_service
+        self.tts = get_tts_service()
+        
+        logger.info(f" Agente '{config.AGENT_NAME}' inicializado con soporte de Memoria{' + TTS' if self.tts.enabled else ''}")
 
     async def _ensure_mcp_connected(self):
-        """Garantiza que la conexión MCP esté activa antes de procesar"""
-        # MCPServerSse tiene estado interno; intentamos conectar si no está activo
+        """
+        Garantiza que la conexión MCP esté activa antes de procesar.
+        Maneja reconexión y fallback inteligente de hosts de forma robusta.
+        """
         try:
-            # En el SDK, connect() es el punto de entrada para inicializar la sesión
-            logger.info("📡 Verificando conexión MCP...")
+            # Obtener URL de forma segura (soporta dict o Pydantic object)
+            params = self.mcp_server.params
+            current_url = getattr(params, "url", None) or (params.get("url") if isinstance(params, dict) else None)
+            
+            logger.info(f"📡 Verificando conexión MCP a {current_url}...")
             await self.mcp_server.connect()
         except Exception as e:
-            # Si ya está conectado, el SDK suele lanzar una excepción o ignorar
-            logger.debug(f"Aviso de conexión MCP: {e}")
+            error_msg = str(e)
+            logger.warning(f"⚠️ Primer intento de conexión falló: {error_msg}")
+            
+            # Fallback inteligente: Si falla 'mcp-simulator', intentar 'localhost'
+            params = self.mcp_server.params
+            current_url = getattr(params, "url", None) or (params.get("url") if isinstance(params, dict) else None)
+            
+            if current_url and "mcp-simulator" in current_url:
+                logger.info("🔄 Detectado entorno local con configuración Docker. Intentando fallback a localhost...")
+                new_url = current_url.replace("mcp-simulator", "localhost")
+                
+                # Actualizar URL de forma agnóstica
+                if isinstance(params, dict):
+                    params["url"] = new_url
+                else:
+                    setattr(params, "url", new_url)
+                
+                try:
+                    logger.info(f"📡 Reintentando conexión a {new_url}...")
+                    await self.mcp_server.connect()
+                    logger.info(f"✅ Conexión exitosa usando fallback: {new_url}")
+                    return
+                except Exception as e2:
+                    logger.error(f"❌ Falló también el fallback a localhost: {e2}")
+            
+            # Si el error sugiere que ya está conectado, lo ignoramos
+            if "already connected" in error_msg.lower() or "connection is active" in error_msg.lower():
+                 logger.debug("Info: Ya estaba conectado.")
+            else:
+                 logger.error(f"❌ Error crítico conectando a MCP: {e}")
 
     async def process_message(
         self,
@@ -109,27 +147,39 @@ class EvoDataAgent:
             # 3. Ejecutar Runner del SDK con Memoria
             result = await Runner.run(self.agent, message, session=session)
             
-            # 3. Extracción Inteligente de Resultados (SOLID: SDK Native)
-            # El Runner.run() devuelve un RunResult que contiene 'new_items' (mensajes, tool_calls, etc.)
+            # 4. Extracción Inteligente de Archivos (FIX CRÍTICO)
+            # El SDK serializa tool outputs como texto, debemos parsear file_path
+            import re
+            from pathlib import Path
+            
             for item in getattr(result, "new_items", []):
-                # En el SDK, los tool calls suelen estar en objetos Message o ToolCall
-                if hasattr(item, "tool_calls") and item.tool_calls:
-                    for tool_call in item.tool_calls:
-                        # Acceder al resultado de la herramienta si está disponible en el item
-                        # O buscar el mensaje de respuesta de la herramienta en new_items
-                        pass
-                
-                # Si el item es un ToolResponseMessage, contiene el objeto de salida
+                # Buscar respuestas de herramientas (role="tool")
                 if hasattr(item, "role") and item.role == "tool":
-                    # En algunas versiones el objeto real está en 'output' o 'content'
-                    output = getattr(item, "output", None)
-                    if output and hasattr(output, "file_path") and output.file_path:
-                        attachments.append(output.file_path)
+                    # Obtener contenido del mensaje de la herramienta
+                    content = ""
+                    if hasattr(item, "content"):
+                        # El contenido puede ser string o lista de ContentBlock
+                        if isinstance(item.content, str):
+                            content = item.content
+                        elif isinstance(item.content, list) and len(item.content) > 0:
+                            content = str(item.content[0].text if hasattr(item.content[0], 'text') else item.content[0])
+                    
+                    # Pattern para encontrar file_path en el output
+                    # Ejemplo: file_path='exports/chart_bar_20260113.png' o file_path=exports/file.xlsx
+                    matches = re.findall(r'file_path[\"\']\s*[=:]\s*[\"\']?([^\s\"\'\)\}]+)', content)
+                    for match in matches:
+                        file_path = Path(match)
+                        if file_path.exists():
+                            attachments.append(str(file_path))
+                            logger.info(f"📎 Archivo detectado: {file_path}")
+                        else:
+                            logger.warning(f"⚠️ Archivo mencionado pero no existe: {file_path}")
 
             return {
                 "success": True,
                 "response": result.final_output,
                 "files": attachments,
+                "voice_note": await self._generate_voice_response(result.final_output, is_voice),
                 "request_id": request_id
             }
 
@@ -137,3 +187,37 @@ class EvoDataAgent:
             from utils.logger import log_error_with_context
             log_error_with_context(logger, e, {"phone_number": phone_number, "request_id": request_id})
             return {"success": False, "error": str(e), "request_id": request_id}
+    
+    async def _generate_voice_response(self, text: str, user_sent_voice: bool) -> Optional[str]:
+        """
+        Genera nota de voz si está habilitado y es apropiado.
+        
+        Args:
+            text: Respuesta del agente en texto
+            user_sent_voice: Si el usuario envió un mensaje de voz
+        
+        Returns:
+            Path del archivo de audio generado, o None si no se generó
+        """
+        if not self.tts.should_use_voice(text, user_sent_voice):
+            return None
+        
+        try:
+            # Limitar longitud para evitar audios muy largos
+            response_text = text
+            if len(response_text) > config.VOICE_RESPONSE_MAX_CHARS:
+                response_text = response_text[:config.VOICE_RESPONSE_MAX_CHARS] + "..."
+            
+            # Generar audio
+            from pathlib import Path
+            voice_path = Path(config.TEMP_DIR) / f"response_{uuid.uuid4().hex}.mp3"
+            
+            success = await self.tts.text_to_speech(response_text, str(voice_path))
+            if success:
+                logger.info(f"🎵 Nota de voz generada: {voice_path}")
+                return str(voice_path)
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"❌ Error generando nota de voz: {e}")
+            return None

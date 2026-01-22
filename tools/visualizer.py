@@ -32,19 +32,38 @@ class ChartResult(BaseModel):
     chart_type: str = Field(..., description="Tipo de gráfico generado")
 
 class VisualizerManager:
-    """Gestiona la generación de archivos de imagen"""
+    """Gestiona la generación de archivos de imagen usando Storage Provider"""
     def __init__(self):
-        self.output_dir = Path(config.EXPORTS_DIR)
-        # Directorio asegurado en el startup del servidor
+        from services.storage_provider import get_storage_provider
+        self.storage = get_storage_provider()
 
     def save_fig(self, fig, prefix: str) -> str:
+        """
+        Guarda figura matplotlib usando Storage Provider.
+        
+        Args:
+            fig: Figura matplotlib
+            prefix: Prefijo del nombre de archivo
+        
+        Returns:
+            Path del archivo guardado
+        """
+        from io import BytesIO
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{prefix}_{timestamp}.png"
-        path = self.output_dir / filename
-        fig.savefig(path, dpi=config.PLOT_DPI, bbox_inches='tight')
+        
+        # Convertir figura a bytes en memoria (evita I/O de disco temporal)
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=config.PLOT_DPI, bbox_inches='tight')
+        buf.seek(0)
+        data = buf.read()
         plt.close(fig)
-        logger.info(f"✅ Gráfico guardado en: {path}")
-        return str(path)
+        
+        # Usar storage provider para guardar
+        path = self.storage.save(data, filename)
+        logger.info(f"✅ Gráfico guardado: {path}")
+        return path
 
 viz_manager = VisualizerManager()
 
